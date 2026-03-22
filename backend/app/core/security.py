@@ -52,7 +52,14 @@ async def get_or_create_user(
     session: AsyncSession,
 ) -> User:
     """Look up user by email, or create on first API call."""
-    email = token_data.email or token_data.sub
+    email = token_data.email
+    if not email:
+        logger.warning("JWT missing required 'email' claim for sub %s", token_data.sub)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing required email claim",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     stmt = select(User).where(User.email == email)
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
