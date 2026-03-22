@@ -94,8 +94,11 @@ export default function AnalysisCard({ result }: Props) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {result.sources.map((s, i) => (
-                <div
+                <a
                   key={i}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -103,6 +106,7 @@ export default function AnalysisCard({ result }: Props) {
                     padding: "4px 8px",
                     borderRadius: 6,
                     background: "rgba(255,255,255,0.02)",
+                    textDecoration: "none",
                   }}
                 >
                   <div
@@ -116,7 +120,7 @@ export default function AnalysisCard({ result }: Props) {
                   />
                   <span style={{ flex: 1, color: "var(--text-primary)" }}>{s.title}</span>
                   <ExternalLinkIcon size={12} style={{ color: "var(--text-secondary)" }} />
-                </div>
+                </a>
               ))}
             </div>
           </div>

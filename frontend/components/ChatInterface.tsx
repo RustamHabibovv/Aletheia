@@ -53,6 +53,12 @@ export default function ChatInterface({ activeTool, session }: Props) {
   }, [session?.id, activeTool]);
 
   useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+    }
+  }, [input]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
@@ -178,6 +184,7 @@ export default function ChatInterface({ activeTool, session }: Props) {
             <span style={{ flex: 1 }}>{attachedFile.name}</span>
             <button
               onClick={() => setAttachedFile(null)}
+              aria-label="Remove attachment"
               style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-secondary)", padding: 0 }}
             >
               <XIcon size={13} />
@@ -517,6 +524,7 @@ function IconButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={title}
       style={{
         width: 36,
         height: 36,
