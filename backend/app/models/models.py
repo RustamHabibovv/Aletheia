@@ -57,9 +57,7 @@ class User(SQLModel, table=True):
         sa_column=Column(Enum(UserTier), nullable=False, server_default="FREE"),
     )
     stripe_customer_id: str | None = Field(default=None, max_length=255)
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    )
+    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now()))
     updated_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     )
@@ -74,9 +72,7 @@ class Conversation(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
     title: str = Field(default="New Conversation", max_length=500)
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    )
+    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now()))
     updated_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     )
@@ -93,9 +89,7 @@ class Message(SQLModel, table=True):
     role: MessageRole = Field(sa_column=Column(Enum(MessageRole), nullable=False))
     content: str = Field(default="")
     metadata_: dict | None = Field(default=None, sa_column=Column("metadata", JSON, nullable=True))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    )
+    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now()))
 
     conversation: Conversation = Relationship(back_populates="messages")
     analysis_result: Optional["AnalysisResult"] = Relationship(
@@ -114,9 +108,7 @@ class AnalysisResult(SQLModel, table=True):
     summary: str = Field(default="")
     detailed_breakdown: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     sources: list | None = Field(default=None, sa_column=Column(JSON, nullable=True))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    )
+    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now()))
 
     message: Message = Relationship(back_populates="analysis_result")
 
@@ -135,9 +127,7 @@ class Subscription(SQLModel, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     current_period_end: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    )
+    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now()))
     updated_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     )
