@@ -65,4 +65,5 @@ jobs:
         env:
           NEXTAUTH_SECRET: ci-test-secret
           DATABASE_URL: sqlite+aiosqlite:///./test.db
+          AUTO_CREATE_TABLES: "true"
           DEBUG: "true"
