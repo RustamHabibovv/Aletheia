@@ -10,7 +10,7 @@ import {
 
 const VERDICT_CONFIG: Record<
   AnalysisResult["verdict"],
-  { label: string; color: string; bg: string; Icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }> }
+  { label: string; color: string; bg: string; Icon: React.ComponentType<{ size?: number | string; style?: React.CSSProperties }> }
 > = {
   "ai-generated":  { label: "AI-Generated",   color: "#ef4444", bg: "rgba(239,68,68,0.1)",   Icon: AlertTriangleIcon },
   manipulated:     { label: "Manipulated",     color: "#ef4444", bg: "rgba(239,68,68,0.1)",   Icon: AlertTriangleIcon },

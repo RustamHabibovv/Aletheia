@@ -20,7 +20,7 @@ import { Session } from "@/lib/sessions";
 
 const TOOL_ICON_MAP: Record<
   string,
-  React.ComponentType<{ size?: number; style?: React.CSSProperties }>
+  React.ComponentType<{ size?: number | string; style?: React.CSSProperties }>
 > = {
   "shield-alert": ShieldAlertIcon,
   image: ImageIcon,
