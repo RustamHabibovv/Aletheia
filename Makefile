@@ -1,4 +1,4 @@
-.PHONY: dev test lint format migrate migrate-create help
+.PHONY: dev test lint format migrate migrate-create migrate-downgrade test-cov help
 
 # ============================================
 # Aletheia - Development Commands

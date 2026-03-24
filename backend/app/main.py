@@ -17,8 +17,8 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     logger.info("Aletheia backend starting up")
-    # Auto-create tables (works with SQLite; for Postgres use Alembic migrations)
-    if settings.is_sqlite:
+    # Auto-create tables only for local dev/testing (skipped when using Alembic migrations)
+    if settings.auto_create_tables:
         from sqlmodel import SQLModel
 
         from app.db.session import engine
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
-        logger.info("SQLite tables auto-created")
+        logger.info("Tables auto-created (AUTO_CREATE_TABLES=true)")
     yield
     logger.info("Aletheia backend shutting down")
 

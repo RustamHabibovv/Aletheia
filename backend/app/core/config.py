@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     # App
     debug: bool = False
+    auto_create_tables: bool = False
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
     backend_cors_origins: list[str] = ["http://localhost:3000"]

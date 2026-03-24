@@ -33,8 +33,8 @@ def upgrade() -> None:
             server_default="FREE",
         ),
         sa.Column("stripe_customer_id", sa.String(length=255), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email"),
     )
@@ -46,8 +46,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("title", sa.String(length=500), nullable=False, server_default="New Conversation"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -65,7 +65,7 @@ def upgrade() -> None:
         ),
         sa.Column("content", sa.Text(), nullable=False, server_default=""),
         sa.Column("metadata", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -90,7 +90,7 @@ def upgrade() -> None:
         sa.Column("summary", sa.Text(), nullable=False, server_default=""),
         sa.Column("detailed_breakdown", sa.JSON(), nullable=True),
         sa.Column("sources", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["message_id"], ["messages.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("message_id"),
@@ -116,8 +116,8 @@ def upgrade() -> None:
         ),
         sa.Column("current_period_start", sa.DateTime(timezone=True), nullable=True),
         sa.Column("current_period_end", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("stripe_subscription_id"),
@@ -145,8 +145,10 @@ def downgrade() -> None:
     op.drop_table("messages")
     op.drop_table("conversations")
     op.drop_table("users")
-    op.execute("DROP TYPE IF EXISTS usertier")
-    op.execute("DROP TYPE IF EXISTS messagerole")
-    op.execute("DROP TYPE IF EXISTS analysistype")
-    op.execute("DROP TYPE IF EXISTS verdict")
-    op.execute("DROP TYPE IF EXISTS subscriptionstatus")
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute("DROP TYPE IF EXISTS usertier")
+        op.execute("DROP TYPE IF EXISTS messagerole")
+        op.execute("DROP TYPE IF EXISTS analysistype")
+        op.execute("DROP TYPE IF EXISTS verdict")
+        op.execute("DROP TYPE IF EXISTS subscriptionstatus")
