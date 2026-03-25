@@ -23,17 +23,13 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 async def list_conversations(user: CurrentUser, session: DBSession) -> list[ConversationResponse]:
     """List all conversations for the authenticated user, newest first."""
     result = await session.execute(
-        select(Conversation)
-        .where(Conversation.user_id == user.id)
-        .order_by(Conversation.updated_at.desc())
+        select(Conversation).where(Conversation.user_id == user.id).order_by(Conversation.updated_at.desc())
     )
     return result.scalars().all()
 
 
 @router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
-async def create_conversation(
-    body: ConversationCreate, user: CurrentUser, session: DBSession
-) -> ConversationResponse:
+async def create_conversation(body: ConversationCreate, user: CurrentUser, session: DBSession) -> ConversationResponse:
     """Create a new conversation."""
     conversation = Conversation(user_id=user.id, title=body.title)
     session.add(conversation)
@@ -49,9 +45,7 @@ async def get_conversation(
     """Get a single conversation with all its messages."""
     conversation = await _get_owned_conversation(conversation_id, user.id, session)
     result = await session.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.asc())
+        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc())
     )
     messages = result.scalars().all()
     return ConversationWithMessages(
@@ -78,9 +72,7 @@ async def rename_conversation(
 
 
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_conversation(
-    conversation_id: uuid.UUID, user: CurrentUser, session: DBSession
-) -> None:
+async def delete_conversation(conversation_id: uuid.UUID, user: CurrentUser, session: DBSession) -> None:
     """Delete a conversation and all its messages."""
     conversation = await _get_owned_conversation(conversation_id, user.id, session)
     await session.delete(conversation)
@@ -105,15 +97,11 @@ async def add_message(
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
-async def list_messages(
-    conversation_id: uuid.UUID, user: CurrentUser, session: DBSession
-) -> list[MessageResponse]:
+async def list_messages(conversation_id: uuid.UUID, user: CurrentUser, session: DBSession) -> list[MessageResponse]:
     """List all messages in a conversation in chronological order."""
     await _get_owned_conversation(conversation_id, user.id, session)
     result = await session.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.asc())
+        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc())
     )
     return result.scalars().all()
 
@@ -121,9 +109,7 @@ async def list_messages(
 # ── helpers ────────────────────────────────────────────────────────
 
 
-async def _get_owned_conversation(
-    conversation_id: uuid.UUID, user_id: uuid.UUID, session: DBSession
-) -> Conversation:
+async def _get_owned_conversation(conversation_id: uuid.UUID, user_id: uuid.UUID, session: DBSession) -> Conversation:
     result = await session.execute(
         select(Conversation).where(
             Conversation.id == conversation_id,
