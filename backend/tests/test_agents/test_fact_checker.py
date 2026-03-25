@@ -75,7 +75,7 @@ async def test_search_evidence_returns_snippets(fact_checker):
         ]
     }
 
-    with patch("app.agents.fact_checker.AsyncTavilyClient", return_value=mock_client):
+    with patch("tavily.AsyncTavilyClient", return_value=mock_client):
         result = await fact_checker._search_evidence("test claim")
 
     assert "Source A" in result
@@ -154,7 +154,8 @@ async def test_check_full_pipeline(fact_checker):
 
     assert result["analysis_type"] == AnalysisType.FACT_CHECK
     assert result["verdict"] == Verdict.PARTIALLY_TRUE
-    assert result["confidence_score"] == 0.7
+    # Confidence calibrated down: no Tavily key → capped at 0.3
+    assert result["confidence_score"] <= 0.3
     assert "1 claim" in result["summary"]
 
 
@@ -171,3 +172,44 @@ def test_aggregate_picks_worst_verdict(fact_checker):
     assert result["verdict"] == Verdict.FALSE
     assert result["confidence_score"] == 0.85
     assert result["sources"] == ["a.com", "b.com"]
+
+
+# ── Confidence calibration ────────────────────────────────────────
+
+
+def test_calibrate_no_evidence_caps_at_03(fact_checker):
+    result = {"confidence": 0.95}
+    evidence = "No search results available (Tavily API key not configured)."
+    assert fact_checker._calibrate_confidence(result, evidence) <= 0.3
+
+
+def test_calibrate_search_unavailable(fact_checker):
+    result = {"confidence": 0.9}
+    evidence = "Search unavailable — evaluating with model knowledge only."
+    assert fact_checker._calibrate_confidence(result, evidence) <= 0.3
+
+
+def test_calibrate_no_source_lines(fact_checker):
+    result = {"confidence": 0.8}
+    evidence = "No relevant results found."
+    assert fact_checker._calibrate_confidence(result, evidence) == 0.4  # 0.8 * 0.5
+
+
+def test_calibrate_few_sources(fact_checker):
+    result = {"confidence": 0.8}
+    evidence = "- [Src A](https://a.com): text A\n- [Src B](https://b.com): text B"
+    assert fact_checker._calibrate_confidence(result, evidence) == 0.6  # 0.8 * 0.75
+
+
+def test_calibrate_many_sources(fact_checker):
+    result = {"confidence": 0.8}
+    lines = [f"- [Src {i}](https://{i}.com): text {i}" for i in range(6)]
+    evidence = "\n".join(lines)
+    assert fact_checker._calibrate_confidence(result, evidence) == 0.8  # 0.8 * 1.0
+
+
+def test_calibrate_clamps_to_1(fact_checker):
+    result = {"confidence": 1.5}  # LLM might hallucinate >1
+    lines = [f"- [Src {i}](https://{i}.com): text" for i in range(6)]
+    evidence = "\n".join(lines)
+    assert fact_checker._calibrate_confidence(result, evidence) == 1.0

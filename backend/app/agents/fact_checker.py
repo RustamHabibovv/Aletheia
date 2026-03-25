@@ -3,8 +3,10 @@
 Uses OpenRouter (OpenAI-compatible API) for LLM and Tavily for web search.
 """
 
+import asyncio
 import json
 import logging
+import re
 
 from openai import AsyncOpenAI
 
@@ -45,18 +47,39 @@ class FactChecker:
         )
         self.model = settings.openrouter_model
 
+    @staticmethod
+    def _parse_json(raw: str) -> dict | list:
+        """Strip markdown fences and parse JSON. Raises on failure."""
+        text = raw.strip()
+        # Remove ```json ... ``` or ``` ... ``` wrappers
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
+        if not text:
+            return {}
+        return json.loads(text)
+
     async def check(self, text: str) -> dict:
         """Run full fact-check pipeline. Returns dict matching AnalysisResult fields."""
         claims = await self._extract_claims(text)
         if not claims:
             return self._no_claims_result()
 
+        # Search evidence for all claims in parallel
+        evidence_list = await asyncio.gather(
+            *(self._search_evidence(claim) for claim in claims)
+        )
+
+        # Evaluate all claims against their evidence in parallel
+        raw_results = await asyncio.gather(
+            *(self._evaluate_claim(claim, evidence) for claim, evidence in zip(claims, evidence_list))
+        )
+
+        # Calibrate confidence based on evidence quality
         claim_results = []
         all_sources: list[str] = []
-
-        for claim in claims:
-            evidence = await self._search_evidence(claim)
-            result = await self._evaluate_claim(claim, evidence)
+        for result, evidence in zip(raw_results, evidence_list):
+            result["confidence"] = self._calibrate_confidence(result, evidence)
             claim_results.append(result)
             all_sources.extend(result.get("key_sources", []))
 
@@ -74,9 +97,10 @@ class FactChecker:
                     {"role": "user", "content": text},
                 ],
                 temperature=0.1,
+                response_format={"type": "json_object"},
             )
             content = resp.choices[0].message.content or "{}"
-            parsed = json.loads(content)
+            parsed = self._parse_json(content)
             if isinstance(parsed, dict):
                 return parsed.get("claims", [])[:10]
             if isinstance(parsed, list):
@@ -95,7 +119,7 @@ class FactChecker:
             from tavily import AsyncTavilyClient
 
             client = AsyncTavilyClient(api_key=self.settings.tavily_api_key)
-            results = await client.search(query=claim, max_results=5)
+            results = await client.search(query=claim, max_results=10)
             snippets = []
             for r in results.get("results", []):
                 title = r.get("title", "Source")
@@ -115,9 +139,12 @@ class FactChecker:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
+                response_format={"type": "json_object"},
             )
             content = resp.choices[0].message.content or "{}"
-            result = json.loads(content)
+            result = self._parse_json(content)
+            if not isinstance(result, dict):
+                result = {}
             result["claim"] = claim
             return result
         except Exception:
@@ -129,6 +156,37 @@ class FactChecker:
                 "explanation": "Evaluation failed due to an error.",
                 "key_sources": [],
             }
+
+    # ── Confidence calibration ─────────────────────────────────────
+
+    @staticmethod
+    def _calibrate_confidence(result: dict, evidence: str) -> float:
+        """Adjust raw LLM confidence using evidence quality signals."""
+        raw = float(result.get("confidence", 0.0))
+
+        # Count how many evidence snippets were returned
+        source_lines = [ln for ln in evidence.splitlines() if ln.strip().startswith("- [")]
+        source_count = len(source_lines)
+
+        if "No search results" in evidence or "Search unavailable" in evidence or "not configured" in evidence:
+            # No external evidence — heavily penalise confidence
+            return round(min(raw, 0.3), 2)
+
+        if source_count == 0:
+            return round(raw * 0.5, 2)
+
+        # Boost/penalise based on evidence volume (sweet spot: 3-5 sources)
+        if source_count >= 5:
+            factor = 1.0
+        elif source_count >= 3:
+            factor = 0.9
+        elif source_count >= 1:
+            factor = 0.75
+        else:
+            factor = 0.5
+
+        calibrated = raw * factor
+        return round(max(0.0, min(calibrated, 1.0)), 2)
 
     # ── Aggregation ────────────────────────────────────────────────
 
