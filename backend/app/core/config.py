@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = ""
 
+    # OpenRouter (LLM gateway — uses OpenAI-compatible API)
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openai/gpt-4o-mini"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
     # Tavily
     tavily_api_key: str = ""
 
