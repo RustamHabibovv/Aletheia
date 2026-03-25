@@ -66,9 +66,7 @@ class FactChecker:
             return self._no_claims_result()
 
         # Search evidence for all claims in parallel
-        evidence_list = await asyncio.gather(
-            *(self._search_evidence(claim) for claim in claims)
-        )
+        evidence_list = await asyncio.gather(*(self._search_evidence(claim) for claim in claims))
 
         # Evaluate all claims against their evidence in parallel
         raw_results = await asyncio.gather(
