@@ -72,13 +72,13 @@ class FactChecker:
 
         # Evaluate all claims against their evidence in parallel
         raw_results = await asyncio.gather(
-            *(self._evaluate_claim(claim, evidence) for claim, evidence in zip(claims, evidence_list))
+            *(self._evaluate_claim(claim, evidence) for claim, evidence in zip(claims, evidence_list, strict=True))
         )
 
         # Calibrate confidence based on evidence quality
         claim_results = []
         all_sources: list[str] = []
-        for result, evidence in zip(raw_results, evidence_list):
+        for result, evidence in zip(raw_results, evidence_list, strict=True):
             result["confidence"] = self._calibrate_confidence(result, evidence)
             claim_results.append(result)
             all_sources.extend(result.get("key_sources", []))
