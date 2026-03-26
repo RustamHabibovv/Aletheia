@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
+from app.agents.fact_checker import FactChecker
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import get_settings
 from app.models import Conversation, Message, MessageRole
@@ -46,7 +47,12 @@ async def chat(
     session.add(user_msg)
     await session.commit()
 
-    reply_text = await generate_reply(body.tool, history, body.content, get_settings())
+    settings = get_settings()
+    if body.tool == "fact-check":
+        result = await FactChecker(settings).check(body.content)
+        reply_text = _format_fact_check(result)
+    else:
+        reply_text = await generate_reply(body.tool, history, body.content, settings)
 
     # Persist assistant message
     assistant_msg = Message(
@@ -59,6 +65,32 @@ async def chat(
     await session.refresh(assistant_msg)
 
     return MessageResponse.model_validate(assistant_msg)
+
+
+def _format_fact_check(result: dict) -> str:
+    verdict = result.get("verdict")
+    confidence = result.get("confidence_score")
+    claims = (result.get("detailed_breakdown") or {}).get("claims", [])
+    sources = result.get("sources") or []
+
+    if not claims:
+        return result.get("summary") or "No verifiable factual claims found in the provided text."
+
+    verdict_str = verdict.value if hasattr(verdict, "value") else str(verdict)
+    conf_pct = f"{round(confidence * 100)}%" if confidence is not None else "N/A"
+
+    lines = [f"**Fact-check complete.**\n\nOverall verdict: **{verdict_str}** ({conf_pct} confidence)\n"]
+    for i, c in enumerate(claims, 1):
+        v = c.get("verdict", "UNVERIFIABLE")
+        conf = round(c.get("confidence", 0.0) * 100)
+        explanation = c.get("explanation", "")
+        lines.append(f"{i}. **{c.get('claim', '')}**\n   *{v}* ({conf}% confidence) — {explanation}")
+
+    if sources:
+        lines.append("\n**Sources:**")
+        lines.extend(f"- {s}" for s in sources[:5])
+
+    return "\n".join(lines)
 
 
 async def _get_owned_conversation(conversation_id: uuid.UUID, user_id: uuid.UUID, session: DBSession) -> Conversation:

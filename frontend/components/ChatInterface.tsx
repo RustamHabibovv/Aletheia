@@ -422,12 +422,14 @@ function MessageRow({ message, index, toolColor }: { message: Message; index: nu
 }
 
 function FormattedText({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
   return (
     <>
       {parts.map((part, i) =>
         part.startsWith("**") && part.endsWith("**") ? (
           <strong key={i}>{part.slice(2, -2)}</strong>
+        ) : part.startsWith("*") && part.endsWith("*") ? (
+          <em key={i}>{part.slice(1, -1)}</em>
         ) : (
           <span key={i}>{part}</span>
         )
