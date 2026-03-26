@@ -66,22 +66,28 @@ class FactChecker:
             return self._no_claims_result()
 
         # Search evidence for all claims in parallel
-        evidence_list = await asyncio.gather(*(self._search_evidence(claim) for claim in claims))
+        search_results = await asyncio.gather(*(self._search_evidence(claim) for claim in claims))
+        evidence_texts = [r[0] for r in search_results]
+        evidence_sources = [r[1] for r in search_results]
 
         # Evaluate all claims against their evidence in parallel
         raw_results = await asyncio.gather(
-            *(self._evaluate_claim(claim, evidence) for claim, evidence in zip(claims, evidence_list, strict=True))
+            *(self._evaluate_claim(claim, evidence) for claim, evidence in zip(claims, evidence_texts, strict=True))
         )
 
         # Calibrate confidence based on evidence quality
         claim_results = []
-        all_sources: list[str] = []
-        for result, evidence in zip(raw_results, evidence_list, strict=True):
-            result["confidence"] = self._calibrate_confidence(result, evidence)
+        all_sources: list[dict] = []
+        seen_urls: set[str] = set()
+        for result, evidence_text, sources in zip(raw_results, evidence_texts, evidence_sources, strict=True):
+            result["confidence"] = self._calibrate_confidence(result, evidence_text)
             claim_results.append(result)
-            all_sources.extend(result.get("key_sources", []))
+            for src in sources:
+                if src["url"] not in seen_urls:
+                    seen_urls.add(src["url"])
+                    all_sources.append(src)
 
-        return self._aggregate(claim_results, list(dict.fromkeys(all_sources)))
+        return self._aggregate(claim_results, all_sources)
 
     # ── Pipeline steps ─────────────────────────────────────────────
 
@@ -108,10 +114,10 @@ class FactChecker:
             logger.exception("Claim extraction failed")
             return []
 
-    async def _search_evidence(self, claim: str) -> str:
-        """Search the web for evidence using Tavily. Degrades gracefully."""
+    async def _search_evidence(self, claim: str) -> tuple[str, list[dict]]:
+        """Search the web for evidence using Tavily. Returns (evidence_text, structured_sources)."""
         if not self.settings.tavily_api_key:
-            return "No search results available (Tavily API key not configured)."
+            return "No search results available (Tavily API key not configured).", []
 
         try:
             from tavily import AsyncTavilyClient
@@ -119,15 +125,19 @@ class FactChecker:
             client = AsyncTavilyClient(api_key=self.settings.tavily_api_key)
             results = await client.search(query=claim, max_results=10)
             snippets = []
+            sources: list[dict] = []
             for r in results.get("results", []):
                 title = r.get("title", "Source")
                 url = r.get("url", "")
                 content = r.get("content", "")[:300]
                 snippets.append(f"- [{title}]({url}): {content}")
-            return "\n".join(snippets) if snippets else "No relevant results found."
+                if url:
+                    sources.append({"title": title, "url": url})
+            evidence = "\n".join(snippets) if snippets else "No relevant results found."
+            return evidence, sources
         except Exception:
             logger.exception("Tavily search failed for: %s", claim[:80])
-            return "Search unavailable — evaluating with model knowledge only."
+            return "Search unavailable — evaluating with model knowledge only.", []
 
     async def _evaluate_claim(self, claim: str, evidence: str) -> dict:
         """Ask LLM to judge a single claim against evidence."""
@@ -188,7 +198,7 @@ class FactChecker:
 
     # ── Aggregation ────────────────────────────────────────────────
 
-    def _aggregate(self, claim_results: list[dict], all_sources: list[str]) -> dict:
+    def _aggregate(self, claim_results: list[dict], all_sources: list[dict]) -> dict:
         """Combine per-claim results into one AnalysisResult-compatible dict."""
         priority = {"FALSE": 0, "MISLEADING": 1, "PARTIALLY_TRUE": 2, "UNVERIFIABLE": 3, "TRUE": 4}
 

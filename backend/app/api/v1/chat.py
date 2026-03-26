@@ -48,9 +48,10 @@ async def chat(
     await session.commit()
 
     settings = get_settings()
+    analysis_result = None
     if body.tool == "fact-check":
-        result = await FactChecker(settings).check(body.content)
-        reply_text = _format_fact_check(result)
+        analysis_result = await FactChecker(settings).check(body.content)
+        reply_text = _format_fact_check(analysis_result)
     else:
         reply_text = await generate_reply(body.tool, history, body.content, settings)
 
@@ -64,7 +65,24 @@ async def chat(
     await session.commit()
     await session.refresh(assistant_msg)
 
-    return MessageResponse.model_validate(assistant_msg)
+    response = MessageResponse.model_validate(assistant_msg)
+    if analysis_result is not None:
+        response.analysis = _serialize_analysis(analysis_result)
+    return response
+
+
+def _serialize_analysis(result: dict) -> dict | None:
+    """Convert agent result dict into a JSON-safe analysis payload."""
+    verdict = result.get("verdict")
+    if verdict is None:
+        return None
+    return {
+        "verdict": verdict.value if hasattr(verdict, "value") else str(verdict),
+        "confidence_score": result.get("confidence_score"),
+        "summary": result.get("summary", ""),
+        "claims": (result.get("detailed_breakdown") or {}).get("claims", []),
+        "sources": result.get("sources") or [],
+    }
 
 
 def _format_fact_check(result: dict) -> str:
@@ -88,7 +106,11 @@ def _format_fact_check(result: dict) -> str:
 
     if sources:
         lines.append("\n**Sources:**")
-        lines.extend(f"- {s}" for s in sources[:5])
+        for s in sources[:5]:
+            if isinstance(s, dict):
+                lines.append(f"- [{s.get('title', 'Source')}]({s.get('url', '')})")
+            else:
+                lines.append(f"- {s}")
 
     return "\n".join(lines)
 

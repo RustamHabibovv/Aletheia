@@ -12,7 +12,7 @@ import {
   BotIcon,
   ShieldAlertIcon,
 } from "lucide-react";
-import { Message, ToolId } from "@/lib/types";
+import { Message, ToolId, AnalysisResult, DetailItem, SourceItem } from "@/lib/types";
 import { TOOLS } from "@/lib/tools";
 import { Session } from "@/lib/sessions";
 import { getConversation, createConversation, sendChat, ApiMessage } from "@/lib/api";
@@ -30,12 +30,45 @@ const TOOL_ICON_MAP: Record<
   bot: BotIcon,
 };
 
+function mapVerdictToLocal(v: string): AnalysisResult["verdict"] {
+  switch (v) {
+    case "TRUE": return "likely-true";
+    case "FALSE": return "likely-false";
+    case "PARTIALLY_TRUE": return "likely-false";
+    case "MISLEADING": return "likely-false";
+    case "UNVERIFIABLE": return "unverified";
+    default: return "unverified";
+  }
+}
+
+function mapApiAnalysis(api: NonNullable<ApiMessage["analysis"]>): AnalysisResult {
+  const verdict = mapVerdictToLocal(api.verdict);
+  const confidence = Math.round((api.confidence_score ?? 0) * 100);
+  const riskLevel: AnalysisResult["riskLevel"] =
+    verdict === "likely-false" ? "high" : verdict === "unverified" ? "medium" : "low";
+
+  const details: DetailItem[] = api.claims.map((c) => ({
+    label: c.claim,
+    value: `${c.verdict} (${Math.round(c.confidence * 100)}%) — ${c.explanation}`,
+    flag: (c.verdict === "TRUE" ? "ok" : c.verdict === "UNVERIFIABLE" ? "info" : "warn") as DetailItem["flag"],
+  }));
+
+  const sources: SourceItem[] = api.sources.map((s) => ({
+    title: s.title,
+    url: s.url,
+    reliability: "medium" as const,
+  }));
+
+  return { verdict, confidence, summary: api.summary, details, sources, riskLevel };
+}
+
 function apiMessageToLocal(m: ApiMessage): Message {
   return {
     id: m.id,
     role: m.role === "USER" ? "user" : "assistant",
     content: m.content,
     timestamp: new Date(m.created_at),
+    ...(m.analysis ? { analysis: mapApiAnalysis(m.analysis) } : {}),
   };
 }
 
@@ -187,7 +220,7 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
                 onClick={() => onToolChange(t.id)}
                 title={t.label}
                 style={{
-                  padding: "4px 8px",
+                  padding: "6px 10px",
                   borderRadius: 6,
                   border: isActive ? `1px solid ${t.color}` : "1px solid transparent",
                   background: isActive ? `${t.color}22` : "transparent",
@@ -212,7 +245,7 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
                   }
                 }}
               >
-                <Icon size={13} />
+                <Icon size={18} />
                 <span style={{ display: "none" }}>{t.shortLabel}</span>
               </button>
             );

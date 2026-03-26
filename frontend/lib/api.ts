@@ -18,6 +18,19 @@ export interface ApiMessage {
   role: "USER" | "ASSISTANT" | "SYSTEM";
   content: string;
   created_at: string;
+  analysis?: {
+    verdict: string;
+    confidence_score: number | null;
+    summary: string;
+    claims: Array<{
+      claim: string;
+      verdict: string;
+      confidence: number;
+      explanation: string;
+      key_sources: string[];
+    }>;
+    sources: Array<{ title: string; url: string }>;
+  } | null;
 }
 
 export interface ApiConversationWithMessages extends ApiConversation {

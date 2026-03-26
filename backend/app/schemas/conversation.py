@@ -32,6 +32,7 @@ class MessageResponse(BaseModel):
     role: MessageRole
     content: str
     created_at: datetime
+    analysis: dict | None = None
 
     model_config = {"from_attributes": True}
 
