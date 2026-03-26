@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   SendIcon,
   PaperclipIcon,
@@ -14,9 +14,9 @@ import {
 } from "lucide-react";
 import { Message, ToolId } from "@/lib/types";
 import { TOOLS } from "@/lib/tools";
-import { getMockResponse } from "@/lib/mockResponses";
-import AnalysisCard from "./AnalysisCard";
 import { Session } from "@/lib/sessions";
+import { getConversation, createConversation, sendChat, ApiMessage } from "@/lib/api";
+import AnalysisCard from "./AnalysisCard";
 
 const TOOL_ICON_MAP: Record<
   string,
@@ -30,47 +30,69 @@ const TOOL_ICON_MAP: Record<
   bot: BotIcon,
 };
 
-interface Props {
-  activeTool: ToolId;
-  session: Session | null;
+function apiMessageToLocal(m: ApiMessage): Message {
+  return {
+    id: m.id,
+    role: m.role === "USER" ? "user" : "assistant",
+    content: m.content,
+    timestamp: new Date(m.created_at),
+  };
 }
 
-export default function ChatInterface({ activeTool, session }: Props) {
+interface Props {
+  activeTool: ToolId;
+  onToolChange: (tool: ToolId) => void;
+  session: Session | null;
+  onConversationCreated: (id: string, title: string) => void;
+}
+
+export default function ChatInterface({ activeTool, onToolChange, session, onConversationCreated }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(session?.id ?? null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tool = TOOLS.find((t) => t.id === activeTool)!;
 
+  // Reset when switching sessions or starting a new one
   useEffect(() => {
+    setConversationId(session?.id ?? null);
     setMessages([]);
     setInput("");
     setAttachedFile(null);
-  }, [session?.id, activeTool]);
+  }, [session?.id]);
 
+  // Load messages when an existing session is selected
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto";
-    }
-  }, [input]);
+    if (!session?.id) return;
+    let cancelled = false;
+    getConversation(session.id)
+      .then((data) => {
+        if (!cancelled) setMessages(data.messages.map(apiMessageToLocal));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [session?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  async function handleSend() {
+  const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text && !attachedFile) return;
     if (isLoading) return;
 
+    const content = text || `[Uploaded: ${attachedFile?.name}]`;
+
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: text || `[Uploaded: ${attachedFile?.name}]`,
+      content,
       timestamp: new Date(),
       fileName: attachedFile?.name,
     };
@@ -81,23 +103,32 @@ export default function ChatInterface({ activeTool, session }: Props) {
     setIsLoading(true);
 
     try {
-      const { text: responseText, analysis } = await getMockResponse(
-        activeTool,
-        text || attachedFile?.name || ""
-      );
-      const assistantMsg: Message = {
+      // Create a new conversation if we don't have one yet
+      let convId = conversationId;
+      if (!convId) {
+        const title = text.slice(0, 80) || attachedFile?.name || "New analysis";
+        const conv = await createConversation(title);
+        convId = conv.id;
+        setConversationId(convId);
+        onConversationCreated(conv.id, conv.title);
+      }
+
+      const assistantApiMsg = await sendChat(convId, content, activeTool);
+      const assistantMsg = apiMessageToLocal(assistantApiMsg);
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err) {
+      const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: responseText,
+        content: `Error: ${err instanceof Error ? err.message : "Something went wrong. Please try again."}`,
         timestamp: new Date(),
-        analysis,
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }
+  }, [input, attachedFile, isLoading, conversationId, activeTool, onConversationCreated]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -126,6 +157,7 @@ export default function ChatInterface({ activeTool, session }: Props) {
           borderBottom: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
+          justifyContent: "space-between",
           background: "var(--surface)",
           flexShrink: 0,
           minHeight: 52,
@@ -142,6 +174,49 @@ export default function ChatInterface({ activeTool, session }: Props) {
           }}
         >
           {session ? session.title : "New analysis"}
+        </div>
+
+        {/* Tool selector */}
+        <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 16 }}>
+          {TOOLS.map((t) => {
+            const Icon = TOOL_ICON_MAP[t.icon] ?? FileTextIcon;
+            const isActive = t.id === activeTool;
+            return (
+              <button
+                key={t.id}
+                onClick={() => onToolChange(t.id)}
+                title={t.label}
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  border: isActive ? `1px solid ${t.color}` : "1px solid transparent",
+                  background: isActive ? `${t.color}22` : "transparent",
+                  color: isActive ? t.color : "var(--text-secondary)",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 12,
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+                    e.currentTarget.style.color = "var(--text-primary)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.color = "var(--text-secondary)";
+                  }
+                }}
+              >
+                <Icon size={13} />
+                <span style={{ display: "none" }}>{t.shortLabel}</span>
+              </button>
+            );
+          })}
         </div>
       </header>
 
@@ -498,7 +573,7 @@ function EmptyState({ tool, onSuggest }: { tool: ReturnType<(typeof TOOLS)["find
               e.currentTarget.style.background = "var(--surface)";
             }}
           >
-            "{s}"
+            &ldquo;{s}&rdquo;
           </button>
         ))}
       </div>
