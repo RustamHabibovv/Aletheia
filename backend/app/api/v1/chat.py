@@ -63,9 +63,7 @@ async def chat(
     return MessageResponse.model_validate(assistant_msg)
 
 
-async def _get_owned_conversation(
-    conversation_id: uuid.UUID, user_id: uuid.UUID, session: DBSession
-) -> Conversation:
+async def _get_owned_conversation(conversation_id: uuid.UUID, user_id: uuid.UUID, session: DBSession) -> Conversation:
     result = await session.execute(
         select(Conversation).where(
             Conversation.id == conversation_id,
