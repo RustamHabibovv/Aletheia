@@ -30,9 +30,7 @@ async def chat(
 
     # Fetch existing messages for context
     history_result = await session.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at)
+        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at)
     )
     history = [
         {"role": "user" if m.role == MessageRole.USER else "assistant", "content": m.content}
