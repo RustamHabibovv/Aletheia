@@ -59,8 +59,9 @@ async def test_extract_claims_empty_on_failure(fact_checker):
 @pytest.mark.asyncio
 async def test_search_evidence_no_api_key(fact_checker):
     fact_checker.settings.tavily_api_key = ""
-    result = await fact_checker._search_evidence("some claim")
-    assert "not configured" in result
+    text, sources = await fact_checker._search_evidence("some claim")
+    assert "not configured" in text
+    assert sources == []
 
 
 @pytest.mark.asyncio
@@ -76,10 +77,12 @@ async def test_search_evidence_returns_snippets(fact_checker):
     }
 
     with patch("tavily.AsyncTavilyClient", return_value=mock_client):
-        result = await fact_checker._search_evidence("test claim")
+        text, sources = await fact_checker._search_evidence("test claim")
 
-    assert "Source A" in result
-    assert "Source B" in result
+    assert "Source A" in text
+    assert "Source B" in text
+    assert len(sources) == 2
+    assert sources[0]["url"] == "https://a.com"
 
 
 # ── Claim evaluation ──────────────────────────────────────────────

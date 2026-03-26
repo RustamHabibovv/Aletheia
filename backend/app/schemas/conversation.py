@@ -8,6 +8,11 @@ from pydantic import BaseModel
 from app.models import MessageRole
 
 
+class ChatRequest(BaseModel):
+    content: str
+    tool: str = "general"
+
+
 class ConversationCreate(BaseModel):
     title: str = "New Conversation"
 
@@ -27,6 +32,7 @@ class MessageResponse(BaseModel):
     role: MessageRole
     content: str
     created_at: datetime
+    analysis: dict | None = None
 
     model_config = {"from_attributes": True}
 

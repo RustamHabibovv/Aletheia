@@ -1,17 +1,18 @@
 "use client";
 
-import { ShieldAlertIcon, PlusIcon } from "lucide-react";
-import { Session, groupSessionsByDate, MOCK_SESSIONS } from "@/lib/sessions";
+import { ShieldAlertIcon, PlusIcon, LogOutIcon } from "lucide-react";
+import { signOut } from "next-auth/react";
+import { Session, groupSessionsByDate } from "@/lib/sessions";
 
 interface SidebarProps {
+  sessions: Session[];
   activeSessionId: string | null;
   onSelectSession: (session: Session) => void;
   onNewSession: () => void;
 }
 
-
-export default function Sidebar({ activeSessionId, onSelectSession, onNewSession }: SidebarProps) {
-  const groups = groupSessionsByDate(MOCK_SESSIONS);
+export default function Sidebar({ sessions, activeSessionId, onSelectSession, onNewSession }: SidebarProps) {
+  const groups = groupSessionsByDate(sessions);
 
   return (
     <aside
@@ -95,6 +96,11 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewSession
 
       {/* Session list */}
       <nav style={{ flex: 1, overflowY: "auto", padding: "4px 10px 12px" }}>
+        {groups.length === 0 && (
+          <div style={{ padding: "20px 10px", fontSize: 13, color: "var(--text-secondary)", textAlign: "center" }}>
+            No conversations yet.
+          </div>
+        )}
         {groups.map((group) => (
           <div key={group.label} style={{ marginBottom: 4 }}>
             <div
@@ -120,6 +126,38 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewSession
           </div>
         ))}
       </nav>
+
+      {/* Logout */}
+      <div style={{ padding: "8px 10px", borderTop: "1px solid var(--border)" }}>
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 12px",
+            borderRadius: 8,
+            border: "none",
+            cursor: "pointer",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            fontSize: 13,
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "var(--text-primary)";
+            e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "var(--text-secondary)";
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <LogOutIcon size={14} />
+          Sign out
+        </button>
+      </div>
     </aside>
   );
 }
