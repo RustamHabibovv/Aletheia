@@ -6,6 +6,7 @@ import {
   CheckCircle2Icon,
   HelpCircleIcon,
   ExternalLinkIcon,
+  LinkIcon,
 } from "lucide-react";
 
 const VERDICT_CONFIG: Record<
@@ -43,6 +44,32 @@ export default function AnalysisCard({ result }: Props) {
         fontSize: 13,
       }}
     >
+      {/* Analyzed URL banner */}
+      {result.sourceUrl && (
+        <a
+          href={result.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 14px",
+            borderBottom: "1px solid var(--border)",
+            background: "rgba(99,102,241,0.08)",
+            textDecoration: "none",
+            fontSize: 11,
+            color: "var(--text-secondary)",
+          }}
+        >
+          <LinkIcon size={11} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Analyzed: {result.sourceUrl}
+          </span>
+          <ExternalLinkIcon size={10} style={{ flexShrink: 0 }} />
+        </a>
+      )}
+
       {/* Header */}
       <div
         style={{
@@ -117,9 +144,22 @@ export default function AnalysisCard({ result }: Props) {
                       background: RELIABILITY_COLOR[s.reliability],
                       flexShrink: 0,
                     }}
+                    title={s.reliability === "high" ? "High credibility source" : s.reliability === "medium" ? "Moderate credibility source" : "Low credibility source"}
                   />
-                  <span style={{ flex: 1, color: "var(--text-primary)" }}>{s.title}</span>
-                  <ExternalLinkIcon size={12} style={{ color: "var(--text-secondary)" }} />
+                  <span style={{ flex: 1, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
+                  <span style={{
+                    fontSize: 9,
+                    padding: "1px 5px",
+                    borderRadius: 4,
+                    background: `${RELIABILITY_COLOR[s.reliability]}22`,
+                    color: RELIABILITY_COLOR[s.reliability],
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    flexShrink: 0,
+                  }}>
+                    {s.reliability}
+                  </span>
+                  <ExternalLinkIcon size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
                 </a>
               ))}
             </div>

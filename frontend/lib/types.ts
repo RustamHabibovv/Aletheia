@@ -34,6 +34,7 @@ export interface AnalysisResult {
   details: DetailItem[];
   sources?: SourceItem[];
   riskLevel: "high" | "medium" | "low";
+  sourceUrl?: string;
 }
 
 export interface DetailItem {

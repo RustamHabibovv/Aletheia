@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import Settings
 from app.models import AnalysisType, Verdict
+from app.services.source_credibility import get_credibility
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +76,12 @@ class FactChecker:
             *(self._evaluate_claim(claim, evidence) for claim, evidence in zip(claims, evidence_texts, strict=True))
         )
 
-        # Calibrate confidence based on evidence quality
+        # Calibrate confidence based on evidence quality and source credibility
         claim_results = []
         all_sources: list[dict] = []
         seen_urls: set[str] = set()
         for result, evidence_text, sources in zip(raw_results, evidence_texts, evidence_sources, strict=True):
-            result["confidence"] = self._calibrate_confidence(result, evidence_text)
+            result["confidence"] = self._calibrate_confidence(result, evidence_text, sources)
             claim_results.append(result)
             for src in sources:
                 if src["url"] not in seen_urls:
@@ -93,26 +94,35 @@ class FactChecker:
 
     async def _extract_claims(self, text: str) -> list[str]:
         """Use LLM to pull out verifiable factual claims."""
-        try:
-            resp = await self.llm.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": CLAIM_EXTRACTION_PROMPT},
-                    {"role": "user", "content": text},
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-            )
-            content = resp.choices[0].message.content or "{}"
-            parsed = self._parse_json(content)
-            if isinstance(parsed, dict):
-                return parsed.get("claims", [])[:10]
-            if isinstance(parsed, list):
-                return parsed[:10]
-            return []
-        except Exception:
-            logger.exception("Claim extraction failed")
-            return []
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                resp = await self.llm.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": CLAIM_EXTRACTION_PROMPT},
+                        {"role": "user", "content": text},
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    timeout=30,
+                )
+                content = resp.choices[0].message.content or "{}"
+                parsed = self._parse_json(content)
+                if isinstance(parsed, dict):
+                    return parsed.get("claims", [])[:10]
+                if isinstance(parsed, list):
+                    return parsed[:10]
+                return []
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("Claim extraction attempt %d failed: %s", attempt + 1, exc)
+                if attempt == 0:
+                    await asyncio.sleep(1)
+
+        # Both attempts failed — re-raise so the caller surfaces a real error
+        logger.error("Claim extraction failed after 2 attempts")
+        raise last_exc  # type: ignore[misc]
 
     async def _search_evidence(self, claim: str) -> tuple[str, list[dict]]:
         """Search the web for evidence using Tavily. Returns (evidence_text, structured_sources)."""
@@ -132,7 +142,14 @@ class FactChecker:
                 content = r.get("content", "")[:300]
                 snippets.append(f"- [{title}]({url}): {content}")
                 if url:
-                    sources.append({"title": title, "url": url})
+                    cred = get_credibility(url)
+                    sources.append({
+                        "title": title,
+                        "url": url,
+                        "credibility_tier": cred.tier,
+                        "credibility_weight": cred.weight,
+                        "credibility_label": cred.label,
+                    })
             evidence = "\n".join(snippets) if snippets else "No relevant results found."
             return evidence, sources
         except Exception:
@@ -148,6 +165,7 @@ class FactChecker:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 response_format={"type": "json_object"},
+                timeout=30,
             )
             content = resp.choices[0].message.content or "{}"
             result = self._parse_json(content)
@@ -168,8 +186,8 @@ class FactChecker:
     # ── Confidence calibration ─────────────────────────────────────
 
     @staticmethod
-    def _calibrate_confidence(result: dict, evidence: str) -> float:
-        """Adjust raw LLM confidence using evidence quality signals."""
+    def _calibrate_confidence(result: dict, evidence: str, sources: list[dict] | None = None) -> float:
+        """Adjust raw LLM confidence using evidence quality signals and source credibility."""
         raw = float(result.get("confidence", 0.0))
 
         # Count how many evidence snippets were returned
@@ -183,17 +201,35 @@ class FactChecker:
         if source_count == 0:
             return round(raw * 0.5, 2)
 
-        # Boost/penalise based on evidence volume (sweet spot: 3-5 sources)
+        # Factor 1: evidence volume
         if source_count >= 5:
-            factor = 1.0
+            volume_factor = 1.0
         elif source_count >= 3:
-            factor = 0.9
+            volume_factor = 0.95
         elif source_count >= 1:
-            factor = 0.75
+            volume_factor = 0.85
         else:
-            factor = 0.5
+            volume_factor = 0.5
 
-        calibrated = raw * factor
+        # Factor 2: source credibility.
+        # Uses best_weight*0.7 + avg_weight*0.3 so that having even one reliable
+        # source (Reuters alongside TikTok) keeps the score high.  Penalty only
+        # applies when *all* sources are low-tier (e.g. purely social media).
+        #
+        # Examples (remapped → credibility_factor):
+        #   Reuters(1.0) + 2×TikTok(0.2):  eff=0.84 → factor 0.94
+        #   3×Wikipedia(0.6):               eff=0.60 → factor 0.84
+        #   3×TikTok(0.2):                  eff=0.20 → factor 0.68
+        if sources:
+            weights = [s.get("credibility_weight", 0.5) for s in sources]
+            best_weight = max(weights)
+            avg_weight = sum(weights) / len(weights)
+            effective_weight = best_weight * 0.7 + avg_weight * 0.3
+        else:
+            effective_weight = 0.8  # no data → assume decent, don't penalise
+        credibility_factor = 0.6 + effective_weight * 0.4
+
+        calibrated = raw * volume_factor * credibility_factor
         return round(max(0.0, min(calibrated, 1.0)), 2)
 
     # ── Aggregation ────────────────────────────────────────────────

@@ -44,13 +44,15 @@ async def test_extract_claims_returns_list(fact_checker):
 
 
 @pytest.mark.asyncio
-async def test_extract_claims_empty_on_failure(fact_checker):
+async def test_extract_claims_raises_on_failure(fact_checker):
+    """After 2 failed attempts, _extract_claims should re-raise the exception
+    so the caller (chat endpoint) can return a proper 503 instead of silently
+    returning 'no claims found'."""
     with patch.object(
         fact_checker.llm.chat.completions, "create", new_callable=AsyncMock, side_effect=Exception("LLM down")
     ):
-        claims = await fact_checker._extract_claims("anything")
-
-    assert claims == []
+        with pytest.raises(Exception, match="LLM down"):
+            await fact_checker._extract_claims("anything")
 
 
 # ── Evidence search ───────────────────────────────────────────────
@@ -83,6 +85,13 @@ async def test_search_evidence_returns_snippets(fact_checker):
     assert "Source B" in text
     assert len(sources) == 2
     assert sources[0]["url"] == "https://a.com"
+    # Credibility fields are annotated on every source
+    assert "credibility_tier" in sources[0]
+    assert "credibility_weight" in sources[0]
+    assert "credibility_label" in sources[0]
+    # a.com is unknown → tier 3, weight 0.5
+    assert sources[0]["credibility_tier"] == 3
+    assert sources[0]["credibility_weight"] == 0.5
 
 
 # ── Claim evaluation ──────────────────────────────────────────────
@@ -170,11 +179,14 @@ def test_aggregate_picks_worst_verdict(fact_checker):
         {"verdict": "TRUE", "confidence": 0.9, "key_sources": ["a.com"]},
         {"verdict": "FALSE", "confidence": 0.8, "key_sources": ["b.com"]},
     ]
-    result = fact_checker._aggregate(claims, ["a.com", "b.com"])
+    src_a = {"title": "A", "url": "https://a.com", "credibility_weight": 1.0}
+    src_b = {"title": "B", "url": "https://b.com", "credibility_weight": 0.8}
+    result = fact_checker._aggregate(claims, [src_a, src_b])
 
     assert result["verdict"] == Verdict.FALSE
     assert result["confidence_score"] == 0.85
-    assert result["sources"] == ["a.com", "b.com"]
+    assert len(result["sources"]) == 2
+    assert result["sources"][0]["url"] == "https://a.com"
 
 
 # ── Confidence calibration ────────────────────────────────────────
@@ -195,24 +207,45 @@ def test_calibrate_search_unavailable(fact_checker):
 def test_calibrate_no_source_lines(fact_checker):
     result = {"confidence": 0.8}
     evidence = "No relevant results found."
-    assert fact_checker._calibrate_confidence(result, evidence) == 0.4  # 0.8 * 0.5
+    # source_count == 0 → early return: raw * 0.5 (credibility not applied)
+    assert fact_checker._calibrate_confidence(result, evidence) == 0.4
 
 
-def test_calibrate_few_sources(fact_checker):
+def test_calibrate_high_credibility_sources(fact_checker):
+    """Reliable sources (BBC/Reuters) should dominate even when mixed with social media."""
     result = {"confidence": 0.8}
-    evidence = "- [Src A](https://a.com): text A\n- [Src B](https://b.com): text B"
-    assert fact_checker._calibrate_confidence(result, evidence) == 0.6  # 0.8 * 0.75
+    evidence = "- [BBC](https://bbc.com): text\n- [Reuters](https://reuters.com): text2\n- [TikTok](https://tiktok.com): vid"
+    sources_mixed = [
+        {"url": "https://bbc.com", "credibility_weight": 1.0},
+        {"url": "https://reuters.com", "credibility_weight": 1.0},
+        {"url": "https://tiktok.com", "credibility_weight": 0.2},
+    ]
+    sources_only_social = [
+        {"url": "https://tiktok.com", "credibility_weight": 0.2},
+        {"url": "https://x.com", "credibility_weight": 0.2},
+        {"url": "https://instagram.com", "credibility_weight": 0.2},
+    ]
+    conf_mixed = fact_checker._calibrate_confidence(result, evidence, sources_mixed)
+    conf_social = fact_checker._calibrate_confidence(result, evidence, sources_only_social)
+    # mixed:  best=1.0, avg≈0.73, eff≈0.92 → cred=0.97 → 0.8*0.95*0.97≈0.74
+    # social: best=0.2, avg=0.2,  eff=0.2  → cred=0.68 → 0.8*0.95*0.68≈0.52
+    assert conf_mixed > conf_social
+    assert conf_mixed >= 0.70  # reliable sources present → should stay high
+    assert conf_social < 0.60  # all social media → penalised
 
 
-def test_calibrate_many_sources(fact_checker):
+def test_calibrate_many_sources_no_credibility(fact_checker):
     result = {"confidence": 0.8}
     lines = [f"- [Src {i}](https://{i}.com): text {i}" for i in range(6)]
     evidence = "\n".join(lines)
-    assert fact_checker._calibrate_confidence(result, evidence) == 0.8  # 0.8 * 1.0
+    # 5+ sources → volume_factor=1.0, no sources passed → effective_weight=0.8
+    # credibility_factor = 0.6 + 0.8*0.4 = 0.92 → 0.8 * 1.0 * 0.92 = 0.74
+    assert fact_checker._calibrate_confidence(result, evidence) == 0.74
 
 
 def test_calibrate_clamps_to_1(fact_checker):
     result = {"confidence": 1.5}  # LLM might hallucinate >1
     lines = [f"- [Src {i}](https://{i}.com): text" for i in range(6)]
     evidence = "\n".join(lines)
-    assert fact_checker._calibrate_confidence(result, evidence) == 1.0
+    sources = [{"url": f"https://{i}.com", "credibility_weight": 1.0} for i in range(6)]
+    assert fact_checker._calibrate_confidence(result, evidence, sources) == 1.0
