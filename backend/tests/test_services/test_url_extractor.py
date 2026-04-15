@@ -27,10 +27,7 @@ def test_extract_urls_multiple():
 
 
 def test_extract_urls_max_3():
-    text = (
-        "https://a.com https://b.com https://c.com "
-        "https://d.com https://e.com"
-    )
+    text = "https://a.com https://b.com https://c.com https://d.com https://e.com"
     assert len(extract_urls(text)) == 3
 
 
@@ -118,7 +115,6 @@ async def test_extract_url_content_tavily_empty_falls_back():
     """When Tavily returns no content, falls back to httpx."""
     mock_tavily = AsyncMock()
     mock_tavily.extract.return_value = {"results": []}
-
 
     mock_response = AsyncMock()
     mock_response.headers = {"content-type": "text/html"}

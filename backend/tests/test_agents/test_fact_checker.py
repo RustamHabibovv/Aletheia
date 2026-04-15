@@ -220,9 +220,7 @@ def test_calibrate_high_credibility_sources(fact_checker):
     """Reliable sources (BBC/Reuters) should dominate even when mixed with social media."""
     result = {"confidence": 0.8}
     evidence = (
-        "- [BBC](https://bbc.com): text\n"
-        "- [Reuters](https://reuters.com): text2\n"
-        "- [TikTok](https://tiktok.com): vid"
+        "- [BBC](https://bbc.com): text\n- [Reuters](https://reuters.com): text2\n- [TikTok](https://tiktok.com): vid"
     )
     sources_mixed = [
         {"url": "https://bbc.com", "credibility_weight": 1.0},

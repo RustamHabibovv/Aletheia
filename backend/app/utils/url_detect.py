@@ -5,9 +5,9 @@ import re
 # Matches http/https URLs, including paths and query strings.
 # Stops at whitespace, quotes, parentheses, and common sentence-ending punctuation.
 _URL_RE = re.compile(
-    r"https?://"                          # scheme
+    r"https?://"  # scheme
     r"(?:[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%])"  # first char (no space)
-    r"[a-zA-Z0-9\-._~:/?#\[\]@!$&'*+,;=%]*",       # rest of URL
+    r"[a-zA-Z0-9\-._~:/?#\[\]@!$&'*+,;=%]*",  # rest of URL
     re.IGNORECASE,
 )
 

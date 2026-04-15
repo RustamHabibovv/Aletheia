@@ -143,13 +143,15 @@ class FactChecker:
                 snippets.append(f"- [{title}]({url}): {content}")
                 if url:
                     cred = get_credibility(url)
-                    sources.append({
-                        "title": title,
-                        "url": url,
-                        "credibility_tier": cred.tier,
-                        "credibility_weight": cred.weight,
-                        "credibility_label": cred.label,
-                    })
+                    sources.append(
+                        {
+                            "title": title,
+                            "url": url,
+                            "credibility_tier": cred.tier,
+                            "credibility_weight": cred.weight,
+                            "credibility_label": cred.label,
+                        }
+                    )
             evidence = "\n".join(snippets) if snippets else "No relevant results found."
             return evidence, sources
         except Exception:

@@ -86,7 +86,7 @@ _DOMAIN_TIERS: dict[str, int] = {
     "aljazeera.com": 1,
     "france24.com": 1,
     "abc.net.au": 1,  # Australian Broadcasting Corporation
-    "cbc.ca": 1,      # Canadian Broadcasting Corporation
+    "cbc.ca": 1,  # Canadian Broadcasting Corporation
     # Fact-checking organisations
     "factcheck.org": 1,
     "snopes.com": 1,
@@ -174,7 +174,7 @@ _DOMAIN_TIERS: dict[str, int] = {
     "youtube.com": 5,
     "youtu.be": 5,
     "reddit.com": 5,
-    "t.co": 5,        # Twitter short URL
+    "t.co": 5,  # Twitter short URL
     "fb.com": 5,
     "threads.net": 5,
     "linkedin.com": 5,

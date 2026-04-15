@@ -1,6 +1,5 @@
 """Tests for source credibility ranking."""
 
-
 from app.services.source_credibility import (
     SourceCredibility,
     _extract_domain,

@@ -110,9 +110,7 @@ async def _extract_via_httpx(url: str, domain: str) -> ExtractedContent:
         import httpx
 
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (compatible; AletheiaBot/1.0; +https://aletheia.ai/bot)"
-            ),
+            "User-Agent": ("Mozilla/5.0 (compatible; AletheiaBot/1.0; +https://aletheia.ai/bot)"),
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Language": "en-US,en;q=0.9",
         }
@@ -182,8 +180,9 @@ def _parse_html(html: str) -> tuple[str, str]:
     title = _clean_text(title_match.group(1)) if title_match else ""
 
     # Remove script / style / nav / footer blocks entirely
-    cleaned = re.sub(r"<(script|style|nav|footer|header|aside|form)[^>]*>.*?</\1>", "", html,
-                     flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(
+        r"<(script|style|nav|footer|header|aside|form)[^>]*>.*?</\1>", "", html, flags=re.IGNORECASE | re.DOTALL
+    )
 
     # Prefer <article> or <main> if present
     article_match = re.search(r"<(article|main)[^>]*>(.*?)</\1>", cleaned, re.IGNORECASE | re.DOTALL)
@@ -198,9 +197,14 @@ def _parse_html(html: str) -> tuple[str, str]:
 def _clean_text(raw: str) -> str:
     """Decode common HTML entities and collapse whitespace."""
     entities = {
-        "&amp;": "&", "&lt;": "<", "&gt;": ">",
-        "&quot;": '"', "&#39;": "'", "&nbsp;": " ",
-        "&#x27;": "'", "&#x2F;": "/",
+        "&amp;": "&",
+        "&lt;": "<",
+        "&gt;": ">",
+        "&quot;": '"',
+        "&#39;": "'",
+        "&nbsp;": " ",
+        "&#x27;": "'",
+        "&#x2F;": "/",
     }
     for entity, char in entities.items():
         raw = raw.replace(entity, char)
