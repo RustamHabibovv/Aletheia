@@ -48,11 +48,16 @@ async def test_extract_claims_raises_on_failure(fact_checker):
     """After 2 failed attempts, _extract_claims should re-raise the exception
     so the caller (chat endpoint) can return a proper 503 instead of silently
     returning 'no claims found'."""
-    with patch.object(
-        fact_checker.llm.chat.completions, "create", new_callable=AsyncMock, side_effect=Exception("LLM down")
+    with (
+        patch.object(
+            fact_checker.llm.chat.completions,
+            "create",
+            new_callable=AsyncMock,
+            side_effect=Exception("LLM down"),
+        ),
+        pytest.raises(Exception, match="LLM down"),
     ):
-        with pytest.raises(Exception, match="LLM down"):
-            await fact_checker._extract_claims("anything")
+        await fact_checker._extract_claims("anything")
 
 
 # ── Evidence search ───────────────────────────────────────────────
@@ -214,7 +219,11 @@ def test_calibrate_no_source_lines(fact_checker):
 def test_calibrate_high_credibility_sources(fact_checker):
     """Reliable sources (BBC/Reuters) should dominate even when mixed with social media."""
     result = {"confidence": 0.8}
-    evidence = "- [BBC](https://bbc.com): text\n- [Reuters](https://reuters.com): text2\n- [TikTok](https://tiktok.com): vid"
+    evidence = (
+        "- [BBC](https://bbc.com): text\n"
+        "- [Reuters](https://reuters.com): text2\n"
+        "- [TikTok](https://tiktok.com): vid"
+    )
     sources_mixed = [
         {"url": "https://bbc.com", "credibility_weight": 1.0},
         {"url": "https://reuters.com", "credibility_weight": 1.0},
