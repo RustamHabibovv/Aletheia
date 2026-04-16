@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
 from app.agents.fact_checker import FactChecker
+from app.agents.text_detector import TextDetector
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import get_settings
 from app.models import Conversation, Message, MessageRole
@@ -84,6 +85,19 @@ async def chat(
         if source_url:
             analysis_result["source_url"] = source_url
         reply_text = _format_fact_check(analysis_result)
+    elif body.tool == "text-detection":
+        # If the user pasted a URL, fetch its content for AI text detection
+        urls = extract_urls(body.content)
+        detect_text = body.content
+        if urls:
+            extracted = await extract_url_content(urls[0], tavily_api_key=settings.tavily_api_key)
+            if extracted.error is None and extracted.text:
+                detect_text = extracted.text
+            else:
+                logger.warning("URL extraction failed for %s: %s", urls[0], extracted.error)
+
+        analysis_result = await TextDetector(settings).detect(detect_text)
+        reply_text = _format_text_detection(analysis_result)
     else:
         reply_text = await generate_reply(body.tool, history, body.content, settings)
 
@@ -108,14 +122,31 @@ def _serialize_analysis(result: dict) -> dict | None:
     verdict = result.get("verdict")
     if verdict is None:
         return None
-    return {
+
+    analysis_type = result.get("analysis_type")
+    at_value = analysis_type.value if hasattr(analysis_type, "value") else str(analysis_type or "")
+
+    base = {
         "verdict": verdict.value if hasattr(verdict, "value") else str(verdict),
         "confidence_score": result.get("confidence_score"),
         "summary": result.get("summary", ""),
-        "claims": (result.get("detailed_breakdown") or {}).get("claims", []),
+        "analysis_type": at_value,
         "sources": result.get("sources") or [],
         "source_url": result.get("source_url"),
     }
+
+    breakdown = result.get("detailed_breakdown") or {}
+
+    if at_value == "TEXT_DETECTION":
+        base["ai_score"] = breakdown.get("ai_score")
+        base["classification"] = breakdown.get("classification", "")
+        base["sentence_analysis"] = breakdown.get("sentence_analysis", [])
+        base["explanation"] = breakdown.get("explanation", "")
+        base["signals"] = breakdown.get("signals", [])
+    else:
+        base["claims"] = breakdown.get("claims", [])
+
+    return base
 
 
 def _format_fact_check(result: dict) -> str:
@@ -144,6 +175,43 @@ def _format_fact_check(result: dict) -> str:
                 lines.append(f"- [{s.get('title', 'Source')}]({s.get('url', '')})")
             else:
                 lines.append(f"- {s}")
+
+    return "\n".join(lines)
+
+
+def _format_text_detection(result: dict) -> str:
+    """Format text detection result as a readable markdown message."""
+    breakdown = result.get("detailed_breakdown") or {}
+    ai_score = breakdown.get("ai_score")
+    classification = breakdown.get("classification", "unknown")
+    explanation = breakdown.get("explanation", "")
+    signals = breakdown.get("signals", [])
+    sentence_analysis = breakdown.get("sentence_analysis", [])
+
+    if classification == "insufficient":
+        return result.get("summary") or "Insufficient text for analysis."
+
+    score_pct = f"{ai_score:.0%}" if ai_score is not None else "N/A"
+    label_map = {"ai-generated": "AI-Generated", "human-written": "Human-Written", "mixed": "Mixed"}
+    label = label_map.get(classification, classification.title())
+
+    lines = [f"**Text analysis complete.**\n\nVerdict: **{label}** ({score_pct} AI probability)\n"]
+
+    if explanation:
+        lines.append(f"{explanation}\n")
+
+    if signals:
+        lines.append("**Signals:**")
+        for s in signals:
+            icon = "⚠️" if s.get("flag") == "warn" else "✅"
+            lines.append(f"- {icon} {s.get('label', '')}: {s.get('value', '')}")
+
+    ai_sentences = [s for s in sentence_analysis if s.get("flag") == "ai"]
+    if ai_sentences:
+        lines.append(f"\n**Flagged sentences** ({len(ai_sentences)}):")
+        for s in ai_sentences[:5]:
+            prob = s.get("ai_probability", 0)
+            lines.append(f'- "{s.get("sentence", "")[:120]}" — {prob:.0%} AI probability')
 
     return "\n".join(lines)
 

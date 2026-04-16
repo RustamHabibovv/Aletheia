@@ -26,6 +26,7 @@ class AnalysisType(enum.StrEnum):
     SOURCE_VERIFY = "SOURCE_VERIFY"
     MISINFO_DETECT = "MISINFO_DETECT"
     SOCIAL_MEDIA = "SOCIAL_MEDIA"
+    TEXT_DETECTION = "TEXT_DETECTION"
 
 
 class Verdict(enum.StrEnum):

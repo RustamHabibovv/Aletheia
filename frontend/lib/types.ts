@@ -34,6 +34,12 @@ export interface AnalysisResult {
   details: DetailItem[];
   sources?: SourceItem[];
   riskLevel: "high" | "medium" | "low";
+  // Text detection specific fields
+  analysisType?: string;
+  aiScore?: number | null;
+  classification?: string;
+  sentenceAnalysis?: SentenceAnalysisItem[];
+  explanation?: string;
   sourceUrl?: string;
 }
 
@@ -47,4 +53,10 @@ export interface SourceItem {
   title: string;
   url: string;
   reliability: "high" | "medium" | "low";
+}
+
+export interface SentenceAnalysisItem {
+  sentence: string;
+  ai_probability: number;
+  flag: "ai" | "human" | "mixed";
 }
