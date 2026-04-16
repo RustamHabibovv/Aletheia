@@ -52,6 +52,7 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True, max_length=320)
     name: str | None = Field(default=None, max_length=255)
     image: str | None = Field(default=None, max_length=1024)
+    hashed_password: str | None = Field(default=None, max_length=255)
     tier: UserTier = Field(
         default=UserTier.FREE,
         sa_column=Column(Enum(UserTier), nullable=False, server_default="FREE"),
