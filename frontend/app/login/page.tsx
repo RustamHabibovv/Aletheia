@@ -5,8 +5,30 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { ShieldAlertIcon } from "lucide-react";
 
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "9px 12px",
+  background: "var(--surface-2)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  color: "var(--text-primary)",
+  fontSize: 14,
+  outline: "none",
+  boxSizing: "border-box",
+};
+
+const labelStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "var(--text-secondary)",
+  display: "block",
+  marginBottom: 6,
+};
+
 export default function LoginPage() {
   const router = useRouter();
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -16,17 +38,33 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
+
+    if (mode === "signup") {
+      const res = await fetch("/api/auth-proxy/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, name: name || undefined }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError((data as { detail?: string }).detail ?? "Registration failed.");
+        setLoading(false);
+        return;
+      }
+    }
+
+    const result = await signIn("credentials", { email, password, redirect: false });
     setLoading(false);
     if (result?.error) {
-      setError("Invalid email address.");
+      setError(mode === "signup" ? "Account created but sign-in failed. Please sign in." : "Invalid email or password.");
     } else {
       router.push("/");
     }
+  }
+
+  function switchMode() {
+    setMode(mode === "login" ? "signup" : "login");
+    setError("");
   }
 
   return (
@@ -70,58 +108,48 @@ export default function LoginPage() {
         </div>
 
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "var(--text-primary)", margin: "0 0 6px" }}>
-          Sign in
+          {mode === "login" ? "Sign in" : "Create account"}
         </h1>
         <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "0 0 24px" }}>
-          Enter your email to get started.
+          {mode === "login" ? "Welcome back. Sign in to continue." : "Enter your details to get started."}
         </p>
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {mode === "signup" && (
+            <div>
+              <label style={labelStyle}>Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                style={inputStyle}
+              />
+            </div>
+          )}
+
           <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 6 }}>
-              Email
-            </label>
+            <label style={labelStyle}>Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="you@example.com"
-              style={{
-                width: "100%",
-                padding: "9px 12px",
-                background: "var(--surface-2)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                color: "var(--text-primary)",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
+              style={inputStyle}
             />
           </div>
 
           <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 6 }}>
-              Password
-            </label>
+            <label style={labelStyle}>Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              minLength={8}
               placeholder="••••••••"
-              style={{
-                width: "100%",
-                padding: "9px 12px",
-                background: "var(--surface-2)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                color: "var(--text-primary)",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
+              style={inputStyle}
             />
           </div>
 
@@ -144,9 +172,27 @@ export default function LoginPage() {
               marginTop: 4,
             }}
           >
-            {loading ? "Signing in…" : "Sign in"}
+            {loading ? (mode === "login" ? "Signing in…" : "Creating account…") : (mode === "login" ? "Sign in" : "Create account")}
           </button>
         </form>
+
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", textAlign: "center", marginTop: 20, marginBottom: 0 }}>
+          {mode === "login" ? "Don't have an account? " : "Already have an account? "}
+          <button
+            onClick={switchMode}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#6366f1",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            {mode === "login" ? "Sign up" : "Sign in"}
+          </button>
+        </p>
       </div>
     </div>
   );

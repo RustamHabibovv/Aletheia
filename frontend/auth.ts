@@ -60,8 +60,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       authorize: async (credentials) => {
         const email = credentials?.email as string | undefined;
-        if (!email || !email.includes("@")) return null;
-        return { id: email, email, name: email.split("@")[0] };
+        const password = credentials?.password as string | undefined;
+        if (!email || !password) return null;
+
+        const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
+        const res = await fetch(`${backendUrl}/api/v1/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+
+        if (!res.ok) return null;
+
+        const user = await res.json() as { id: string; email: string; name: string | null; image: string | null };
+        return { id: user.id, email: user.email, name: user.name ?? undefined, image: user.image ?? undefined };
       },
     }),
   ],
