@@ -53,13 +53,18 @@ function mapApiAnalysis(api: NonNullable<ApiMessage["analysis"]>): AnalysisResul
     flag: (c.verdict === "TRUE" ? "ok" : c.verdict === "UNVERIFIABLE" ? "info" : "warn") as DetailItem["flag"],
   }));
 
-  const sources: SourceItem[] = api.sources.map((s) => ({
-    title: s.title,
-    url: s.url,
-    reliability: "medium" as const,
-  }));
+  const sources: SourceItem[] = api.sources.map((s) => {
+    const tier = s.credibility_tier ?? 3;
+    const reliability: SourceItem["reliability"] =
+      tier <= 2 ? "high" : tier === 3 ? "medium" : "low";
+    return {
+      title: s.title,
+      url: s.url,
+      reliability,
+    };
+  });
 
-  return { verdict, confidence, summary: api.summary, details, sources, riskLevel };
+  return { verdict, confidence, summary: api.summary, details, sources, riskLevel, sourceUrl: api.source_url ?? undefined };
 }
 
 function apiMessageToLocal(m: ApiMessage): Message {

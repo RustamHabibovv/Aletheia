@@ -29,7 +29,14 @@ export interface ApiMessage {
       explanation: string;
       key_sources: string[];
     }>;
-    sources: Array<{ title: string; url: string }>;
+    sources: Array<{
+      title: string;
+      url: string;
+      credibility_tier?: number;
+      credibility_weight?: number;
+      credibility_label?: string;
+    }>;
+    source_url?: string | null;
   } | null;
 }
 
