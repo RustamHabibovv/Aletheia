@@ -1,5 +1,6 @@
 """Chat endpoint — sends a user message and returns an assistant reply."""
 
+import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
@@ -12,7 +13,10 @@ from app.core.config import get_settings
 from app.models import Conversation, Message, MessageRole
 from app.schemas.conversation import ChatRequest, MessageResponse
 from app.services.openai_service import generate_reply
-from app.services.url_extractor import extract_urls, fetch_url_text
+from app.services.url_extractor import extract_url_content
+from app.utils.url_detect import extract_urls
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["chat"])
 
@@ -51,21 +55,48 @@ async def chat(
 
     settings = get_settings()
     analysis_result = None
-
-    # Pre-process: if input contains URLs, extract page content for analysis tools
-    agent_input = body.content
-    if body.tool in ("fact-check", "text-detection"):
-        urls = extract_urls(body.content)
-        if urls:
-            extracted = await fetch_url_text(urls[0], tavily_api_key=settings.tavily_api_key)
-            if extracted:
-                agent_input = extracted
-
+    source_url: str | None = None
     if body.tool == "fact-check":
-        analysis_result = await FactChecker(settings).check(agent_input)
+        # If the user pasted a URL, fetch its content and analyse that instead
+        urls = extract_urls(body.content)
+        fact_check_text = body.content
+        if urls:
+            source_url = urls[0]  # analyse the first URL
+            extracted = await extract_url_content(source_url, tavily_api_key=settings.tavily_api_key)
+            if extracted.error is None and extracted.text:
+                # Prepend URL context so the LLM/pipeline knows the source
+                fact_check_text = (
+                    f"[Source: {extracted.source_domain} — {extracted.url}]\n"
+                    f"Title: {extracted.title}\n\n"
+                    f"{extracted.text}"
+                )
+            else:
+                logger.warning("URL extraction failed for %s: %s", source_url, extracted.error)
+                source_url = None  # treat as plain-text input
+
+        try:
+            analysis_result = await FactChecker(settings).check(fact_check_text)
+        except Exception as exc:
+            logger.error("Fact-check pipeline error: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Fact-check service is temporarily unavailable. Please try again in a moment.",
+            ) from exc
+        if source_url:
+            analysis_result["source_url"] = source_url
         reply_text = _format_fact_check(analysis_result)
     elif body.tool == "text-detection":
-        analysis_result = await TextDetector(settings).detect(agent_input)
+        # If the user pasted a URL, fetch its content for AI text detection
+        urls = extract_urls(body.content)
+        detect_text = body.content
+        if urls:
+            extracted = await extract_url_content(urls[0], tavily_api_key=settings.tavily_api_key)
+            if extracted.error is None and extracted.text:
+                detect_text = extracted.text
+            else:
+                logger.warning("URL extraction failed for %s: %s", urls[0], extracted.error)
+
+        analysis_result = await TextDetector(settings).detect(detect_text)
         reply_text = _format_text_detection(analysis_result)
     else:
         reply_text = await generate_reply(body.tool, history, body.content, settings)
@@ -101,6 +132,7 @@ def _serialize_analysis(result: dict) -> dict | None:
         "summary": result.get("summary", ""),
         "analysis_type": at_value,
         "sources": result.get("sources") or [],
+        "source_url": result.get("source_url"),
     }
 
     breakdown = result.get("detailed_breakdown") or {}

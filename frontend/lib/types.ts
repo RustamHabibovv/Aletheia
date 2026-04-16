@@ -40,6 +40,7 @@ export interface AnalysisResult {
   classification?: string;
   sentenceAnalysis?: SentenceAnalysisItem[];
   explanation?: string;
+  sourceUrl?: string;
 }
 
 export interface DetailItem {

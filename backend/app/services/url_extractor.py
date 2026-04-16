@@ -1,61 +1,55 @@
-"""URL detection and content extraction utility.
+"""URL content extractor — fetches a URL and returns its readable text.
 
-Detects URLs in user input, fetches the page content (via Tavily Extract or httpx
-fallback), and returns the readable text. Used by chat dispatch to pre-process input
-before sending to agents like FactChecker or TextDetector.
+Uses Tavily Extract as the primary method (handles JS-rendered pages and many social
+media platforms).  Falls back to httpx + basic HTML parsing as a secondary method for
+simple pages when Tavily is not configured.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-
-import httpx
+from dataclasses import dataclass
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-# Matches common http/https URLs
-_URL_RE = re.compile(r"https?://[^\s<>\"'\)\]]+", re.IGNORECASE)
-
-MAX_CONTENT_CHARS = 12_000
+# Maximum character length of extracted text sent to the fact-checker
+MAX_CONTENT_CHARS = 8_000
 
 
-def extract_urls(text: str) -> list[str]:
-    """Return deduplicated list of URLs found in text (max 3)."""
-    seen: set[str] = set()
-    urls: list[str] = []
-    for m in _URL_RE.finditer(text):
-        url = m.group().rstrip(".,;:!?)")
-        if url not in seen:
-            seen.add(url)
-            urls.append(url)
-        if len(urls) >= 3:
-            break
-    return urls
+@dataclass
+class ExtractedContent:
+    url: str
+    title: str
+    text: str
+    source_domain: str
+    extraction_method: str  # "tavily" | "httpx" | "failed"
+    error: str | None = None
 
 
-def looks_like_url_only(text: str) -> bool:
-    """Return True if the text is just a URL (possibly with whitespace)."""
-    stripped = text.strip()
-    return bool(_URL_RE.fullmatch(stripped.rstrip(".,;:!?)")))
+async def extract_url_content(url: str, tavily_api_key: str = "") -> ExtractedContent:
+    """Extract readable text from a URL.
 
-
-async def fetch_url_text(url: str, tavily_api_key: str = "") -> str | None:
-    """Fetch readable text from a URL. Returns None on failure.
-
-    Tries Tavily Extract first (handles JS-rendered pages).
-    Falls back to httpx + basic HTML tag stripping.
+    Tries Tavily Extract first (supports JS-rendered pages, social media).
+    Falls back to httpx + HTML stripping for simple pages.
+    Returns an ExtractedContent even on failure (with error field set).
     """
+    domain = _get_domain(url)
+
     if tavily_api_key:
-        result = await _fetch_via_tavily(url, tavily_api_key)
-        if result:
+        result = await _extract_via_tavily(url, tavily_api_key, domain)
+        if result.error is None:
             return result
-        logger.warning("Tavily extraction failed for %s — trying httpx fallback", url[:80])
+        logger.warning("Tavily extraction failed for %s: %s — trying httpx fallback", url[:80], result.error)
 
-    return await _fetch_via_httpx(url)
+    return await _extract_via_httpx(url, domain)
 
 
-async def _fetch_via_tavily(url: str, api_key: str) -> str | None:
+# ── Tavily Extract ─────────────────────────────────────────────────────────────
+
+
+async def _extract_via_tavily(url: str, api_key: str, domain: str) -> ExtractedContent:
     try:
         from tavily import AsyncTavilyClient
 
@@ -64,47 +58,163 @@ async def _fetch_via_tavily(url: str, api_key: str) -> str | None:
 
         results = response.get("results", [])
         if not results:
-            return None
+            return ExtractedContent(
+                url=url,
+                title="",
+                text="",
+                source_domain=domain,
+                extraction_method="tavily",
+                error="Tavily returned no results",
+            )
 
         first = results[0]
         raw_content = first.get("raw_content") or first.get("content") or ""
+        title = first.get("title") or ""
+
         if not raw_content:
-            return None
+            return ExtractedContent(
+                url=url,
+                title=title,
+                text="",
+                source_domain=domain,
+                extraction_method="tavily",
+                error="Tavily returned empty content",
+            )
 
-        return _clean_text(raw_content)[:MAX_CONTENT_CHARS]
-    except Exception:
+        text = _clean_text(raw_content)[:MAX_CONTENT_CHARS]
+        return ExtractedContent(
+            url=url,
+            title=title,
+            text=text,
+            source_domain=domain,
+            extraction_method="tavily",
+        )
+
+    except Exception as exc:
         logger.exception("Tavily extract error for %s", url[:80])
-        return None
+        return ExtractedContent(
+            url=url,
+            title="",
+            text="",
+            source_domain=domain,
+            extraction_method="tavily",
+            error=str(exc),
+        )
 
 
-async def _fetch_via_httpx(url: str) -> str | None:
+# ── httpx fallback ─────────────────────────────────────────────────────────────
+
+
+async def _extract_via_httpx(url: str, domain: str) -> ExtractedContent:
     try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "Aletheia/1.0"})
+        import httpx
+
+        headers = {
+            "User-Agent": ("Mozilla/5.0 (compatible; AletheiaBot/1.0; +https://aletheia.ai/bot)"),
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=httpx.Timeout(10.0),
+            limits=httpx.Limits(max_connections=5),
+        ) as client:
+            resp = await client.get(url, headers=headers)
             resp.raise_for_status()
+
             content_type = resp.headers.get("content-type", "")
-            if "text/html" not in content_type and "text/plain" not in content_type:
-                return None
-            html = resp.text
-            text = _strip_html(html)
-            text = _clean_text(text)
-            return text[:MAX_CONTENT_CHARS] if text else None
+            if "html" not in content_type and "text" not in content_type:
+                return ExtractedContent(
+                    url=url,
+                    title="",
+                    text="",
+                    source_domain=domain,
+                    extraction_method="httpx",
+                    error=f"Non-HTML content-type: {content_type}",
+                )
+
+            # Limit to 1 MB to avoid parsing huge pages
+            raw_html = resp.text[:1_048_576]
+
+        title, text = _parse_html(raw_html)
+        text = text[:MAX_CONTENT_CHARS]
+
+        if not text.strip():
+            return ExtractedContent(
+                url=url,
+                title=title,
+                text="",
+                source_domain=domain,
+                extraction_method="httpx",
+                error="No readable text found in page",
+            )
+
+        return ExtractedContent(
+            url=url,
+            title=title,
+            text=text,
+            source_domain=domain,
+            extraction_method="httpx",
+        )
+
+    except Exception as exc:
+        logger.exception("httpx extraction error for %s", url[:80])
+        return ExtractedContent(
+            url=url,
+            title="",
+            text="",
+            source_domain=domain,
+            extraction_method="httpx",
+            error=str(exc),
+        )
+
+
+# ── HTML parsing (no dependency — pure regex soup) ────────────────────────────
+
+
+def _parse_html(html: str) -> tuple[str, str]:
+    """Extract title and main text from raw HTML without BeautifulSoup."""
+    # Title
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    title = _clean_text(title_match.group(1)) if title_match else ""
+
+    # Remove script / style / nav / footer blocks entirely
+    cleaned = re.sub(
+        r"<(script|style|nav|footer|header|aside|form)[^>]*>.*?</\1>", "", html, flags=re.IGNORECASE | re.DOTALL
+    )
+
+    # Prefer <article> or <main> if present
+    article_match = re.search(r"<(article|main)[^>]*>(.*?)</\1>", cleaned, re.IGNORECASE | re.DOTALL)
+    body = article_match.group(2) if article_match else cleaned
+
+    # Strip remaining tags, decode entities
+    text = re.sub(r"<[^>]+>", " ", body)
+    text = _clean_text(text)
+    return title, text
+
+
+def _clean_text(raw: str) -> str:
+    """Decode common HTML entities and collapse whitespace."""
+    entities = {
+        "&amp;": "&",
+        "&lt;": "<",
+        "&gt;": ">",
+        "&quot;": '"',
+        "&#39;": "'",
+        "&nbsp;": " ",
+        "&#x27;": "'",
+        "&#x2F;": "/",
+    }
+    for entity, char in entities.items():
+        raw = raw.replace(entity, char)
+    # Collapse whitespace
+    return " ".join(raw.split())
+
+
+def _get_domain(url: str) -> str:
+    try:
+        parsed = urlparse(url if url.startswith("http") else f"https://{url}")
+        return (parsed.netloc or "").removeprefix("www.")
     except Exception:
-        logger.exception("httpx fetch error for %s", url[:80])
-        return None
-
-
-def _strip_html(html: str) -> str:
-    """Remove HTML tags, scripts, styles and return plain text."""
-    text = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"&[a-zA-Z]+;", " ", text)  # HTML entities
-    text = re.sub(r"&#?\w+;", " ", text)
-    return text
-
-
-def _clean_text(text: str) -> str:
-    """Collapse whitespace and strip."""
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+        return ""
