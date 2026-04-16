@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.agents.fact_checker import FactChecker
+from app.agents.text_detector import TextDetector
 from app.core.config import get_settings
 from app.models import AnalysisResult, AnalysisType, Message
 
@@ -24,6 +25,9 @@ async def run_analysis(
     if analysis_type == AnalysisType.FACT_CHECK:
         agent = FactChecker(settings)
         result_data = await agent.check(message.content)
+    elif analysis_type == AnalysisType.TEXT_DETECTION:
+        agent = TextDetector(settings)
+        result_data = await agent.detect(message.content)
     else:
         result_data = {
             "analysis_type": analysis_type,

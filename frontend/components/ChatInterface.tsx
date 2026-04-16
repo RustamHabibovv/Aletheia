@@ -17,6 +17,7 @@ import { TOOLS } from "@/lib/tools";
 import { Session } from "@/lib/sessions";
 import { getConversation, createConversation, sendChat, ApiMessage } from "@/lib/api";
 import AnalysisCard from "./AnalysisCard";
+import TextDetectionCard from "./TextDetectionCard";
 
 const TOOL_ICON_MAP: Record<
   string,
@@ -30,7 +31,16 @@ const TOOL_ICON_MAP: Record<
   bot: BotIcon,
 };
 
-function mapVerdictToLocal(v: string): AnalysisResult["verdict"] {
+function mapVerdictToLocal(v: string, analysisType?: string): AnalysisResult["verdict"] {
+  if (analysisType === "TEXT_DETECTION") {
+    switch (v) {
+      case "TRUE": return "authentic";       // Human-Written
+      case "FALSE": return "ai-generated";   // AI-Generated
+      case "PARTIALLY_TRUE": return "ai-generated"; // Mixed
+      case "UNVERIFIABLE": return "unverified";
+      default: return "unverified";
+    }
+  }
   switch (v) {
     case "TRUE": return "likely-true";
     case "FALSE": return "likely-false";
@@ -42,12 +52,41 @@ function mapVerdictToLocal(v: string): AnalysisResult["verdict"] {
 }
 
 function mapApiAnalysis(api: NonNullable<ApiMessage["analysis"]>): AnalysisResult {
-  const verdict = mapVerdictToLocal(api.verdict);
+  const analysisType = api.analysis_type ?? "";
+  const verdict = mapVerdictToLocal(api.verdict, analysisType);
   const confidence = Math.round((api.confidence_score ?? 0) * 100);
+
+  // Text detection path
+  if (analysisType === "TEXT_DETECTION") {
+    const riskLevel: AnalysisResult["riskLevel"] =
+      verdict === "ai-generated" ? "high" : verdict === "unverified" ? "medium" : "low";
+
+    const details: DetailItem[] = (api.signals ?? []).map((s) => ({
+      label: s.label,
+      value: s.value,
+      flag: s.flag as DetailItem["flag"],
+    }));
+
+    return {
+      verdict,
+      confidence,
+      summary: api.summary,
+      details,
+      sources: [],
+      riskLevel,
+      analysisType,
+      aiScore: api.ai_score ?? null,
+      classification: api.classification,
+      sentenceAnalysis: api.sentence_analysis,
+      explanation: api.explanation,
+    };
+  }
+
+  // Default fact-check path
   const riskLevel: AnalysisResult["riskLevel"] =
     verdict === "likely-false" ? "high" : verdict === "unverified" ? "medium" : "low";
 
-  const details: DetailItem[] = api.claims.map((c) => ({
+  const details: DetailItem[] = (api.claims ?? []).map((c) => ({
     label: c.claim,
     value: `${c.verdict} (${Math.round(c.confidence * 100)}%) — ${c.explanation}`,
     flag: (c.verdict === "TRUE" ? "ok" : c.verdict === "UNVERIFIABLE" ? "info" : "warn") as DetailItem["flag"],
@@ -437,7 +476,11 @@ function MessageRow({ message, index, toolColor }: { message: Message; index: nu
           <FormattedText text={message.content} />
         </div>
 
-        {message.analysis && <AnalysisCard result={message.analysis} />}
+        {message.analysis && (
+          message.analysis.analysisType === "TEXT_DETECTION"
+            ? <TextDetectionCard result={message.analysis} />
+            : <AnalysisCard result={message.analysis} />
+        )}
 
         <div
           style={{

@@ -22,7 +22,8 @@ export interface ApiMessage {
     verdict: string;
     confidence_score: number | null;
     summary: string;
-    claims: Array<{
+    analysis_type?: string;
+    claims?: Array<{
       claim: string;
       verdict: string;
       confidence: number;
@@ -30,6 +31,20 @@ export interface ApiMessage {
       key_sources: string[];
     }>;
     sources: Array<{ title: string; url: string }>;
+    // Text detection fields
+    ai_score?: number | null;
+    classification?: string;
+    sentence_analysis?: Array<{
+      sentence: string;
+      ai_probability: number;
+      flag: "ai" | "human" | "mixed";
+    }>;
+    explanation?: string;
+    signals?: Array<{
+      label: string;
+      value: string;
+      flag: "warn" | "ok" | "info";
+    }>;
   } | null;
 }
 

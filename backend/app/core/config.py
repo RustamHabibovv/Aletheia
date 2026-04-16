@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Tavily
     tavily_api_key: str = ""
 
+    # Sapling (AI text detection)
+    sapling_api_key: str = ""
+
     # Stripe
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
