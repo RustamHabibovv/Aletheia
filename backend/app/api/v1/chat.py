@@ -2,11 +2,10 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
-
-from datetime import datetime, timezone
 
 from app.agents.fact_checker import FactChecker
 from app.agents.text_detector import TextDetector
@@ -67,7 +66,10 @@ async def chat(
         if usage.request_count >= FREE_DAILY_FACTCHECK_LIMIT:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Daily limit of {FREE_DAILY_FACTCHECK_LIMIT} analyses reached. Upgrade to Pro for unlimited access.",
+                detail=(
+                    f"Daily limit of {FREE_DAILY_FACTCHECK_LIMIT} analyses reached. "
+                    "Upgrade to Pro for unlimited access."
+                ),
             )
 
     if body.tool == "fact-check":
@@ -239,8 +241,8 @@ def _format_text_detection(result: dict) -> str:
 
 
 async def _get_or_create_usage(user_id: uuid.UUID, session: DBSession) -> UsageRecord:
-    today = datetime.now(tz=timezone.utc).date()
-    today_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    today = datetime.now(tz=UTC).date()
+    today_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
     result = await session.execute(
         select(UsageRecord).where(
             UsageRecord.user_id == user_id,

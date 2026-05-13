@@ -1,7 +1,7 @@
 """Stripe billing endpoints — checkout, webhook, subscription status, customer portal."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import stripe
 from fastapi import APIRouter, HTTPException, Request, status
@@ -20,6 +20,7 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
+
 
 class CheckoutRequest(BaseModel):
     plan: str  # "monthly" | "yearly"
@@ -92,6 +93,7 @@ class UsageResponse(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────────
 
+
 @router.post("/checkout")
 async def create_checkout_session(
     body: CheckoutRequest,
@@ -126,7 +128,10 @@ async def create_checkout_session(
     if not price_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Stripe price for {plan_tier} {body.plan} is not configured. Set STRIPE_PRICE_{plan_tier}_{body.plan.upper()} in .env.",
+            detail=(
+                f"Stripe price for {plan_tier} {body.plan} is not configured. "
+                f"Set STRIPE_PRICE_{plan_tier}_{body.plan.upper()} in .env."
+            ),
         )
 
     # Retrieve or create a Stripe customer
@@ -166,8 +171,11 @@ async def stripe_webhook(request: Request, db: DBSession) -> dict:
     if not settings.debug:
         try:
             stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
-        except stripe.SignatureVerificationError:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid signature")
+        except stripe.SignatureVerificationError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid signature",
+            ) from err
 
     # Always parse payload as plain Python dict — StripeObject.get() is broken
     event_dict = _json.loads(payload)
@@ -231,10 +239,10 @@ async def get_subscription(user: CurrentUser, db: DBSession) -> SubscriptionResp
                     pending_ts = int(pending_ts_raw)
                 except ValueError:
                     pending_ts = 0
-                now_ts = int(datetime.now(tz=timezone.utc).timestamp())
+                now_ts = int(datetime.now(tz=UTC).timestamp())
                 if pending_ts > now_ts:
                     pending_plan_tier = md["pending_plan_tier"].upper()
-                    pending_change_at = datetime.fromtimestamp(pending_ts, tz=timezone.utc).isoformat()
+                    pending_change_at = datetime.fromtimestamp(pending_ts, tz=UTC).isoformat()
         except Exception:
             logger.exception("Failed to fetch live state from Stripe for sub %s", sub.stripe_subscription_id)
 
@@ -255,8 +263,8 @@ async def get_usage(user: CurrentUser, db: DBSession) -> UsageResponse:
     if user.tier != UserTier.FREE:
         return UsageResponse(used=0, limit=None, remaining=None)
 
-    today = datetime.now(tz=timezone.utc).date()
-    today_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    today = datetime.now(tz=UTC).date()
+    today_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
     result = await db.execute(
         select(UsageRecord).where(
             UsageRecord.user_id == user.id,
@@ -265,7 +273,11 @@ async def get_usage(user: CurrentUser, db: DBSession) -> UsageResponse:
     )
     record = result.scalar_one_or_none()
     used = record.request_count if record else 0
-    return UsageResponse(used=used, limit=FREE_DAILY_FACTCHECK_LIMIT, remaining=max(0, FREE_DAILY_FACTCHECK_LIMIT - used))
+    return UsageResponse(
+        used=used,
+        limit=FREE_DAILY_FACTCHECK_LIMIT,
+        remaining=max(0, FREE_DAILY_FACTCHECK_LIMIT - used),
+    )
 
 
 @router.post("/sync")
@@ -316,9 +328,7 @@ async def sync_subscription(user: CurrentUser, db: DBSession) -> dict:
         local_status = SubscriptionStatus.PAST_DUE
         local_tier = UserTier.FREE
 
-    existing = await db.execute(
-        select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-    )
+    existing = await db.execute(select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id))
     sub = existing.scalar_one_or_none()
     if sub is None:
         sub = Subscription(
@@ -326,15 +336,15 @@ async def sync_subscription(user: CurrentUser, db: DBSession) -> dict:
             stripe_subscription_id=stripe_sub_id,
             plan=UserTier.PRO,
             status=local_status,
-            current_period_start=datetime.fromtimestamp(period_start, tz=timezone.utc) if period_start else None,
-            current_period_end=datetime.fromtimestamp(period_end, tz=timezone.utc) if period_end else None,
+            current_period_start=datetime.fromtimestamp(period_start, tz=UTC) if period_start else None,
+            current_period_end=datetime.fromtimestamp(period_end, tz=UTC) if period_end else None,
         )
     else:
         sub.status = local_status
         if period_start:
-            sub.current_period_start = datetime.fromtimestamp(period_start, tz=timezone.utc)
+            sub.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)
         if period_end:
-            sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
+            sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
 
     user.tier = local_tier
     db.add(sub)
@@ -394,7 +404,10 @@ async def change_plan(
     stripe_sub = _json.loads(str(stripe.Subscription.retrieve(sub.stripe_subscription_id)))
     items = stripe_sub.get("items", {}).get("data", [])
     if not items:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Stripe subscription has no items")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stripe subscription has no items",
+        )
     item_id = items[0]["id"]
     current_price_id = items[0].get("price", {}).get("id", "")
 
@@ -487,7 +500,7 @@ async def change_plan(
         status="scheduled",
         current_plan_tier=current_tier,
         pending_plan_tier=target_tier,
-        pending_change_at=datetime.fromtimestamp(period_end, tz=timezone.utc).isoformat(),
+        pending_change_at=datetime.fromtimestamp(period_end, tz=UTC).isoformat(),
     )
 
 
@@ -521,9 +534,7 @@ async def cancel_subscription(user: CurrentUser, db: DBSession) -> CancelRespons
     updated = stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
     updated_dict: dict = _json.loads(str(updated))
     period_end = updated_dict.get("current_period_end")
-    period_end_iso = (
-        datetime.fromtimestamp(period_end, tz=timezone.utc).isoformat() if period_end else None
-    )
+    period_end_iso = datetime.fromtimestamp(period_end, tz=UTC).isoformat() if period_end else None
 
     return CancelResponse(
         cancel_at_period_end=bool(updated_dict.get("cancel_at_period_end")),
@@ -550,6 +561,7 @@ async def create_portal_session(user: CurrentUser) -> dict:
 
 # ── Webhook helpers ──────────────────────────────────────────────────
 
+
 async def _handle_checkout_completed(data: dict, db: DBSession) -> None:
     stripe_sub_id: str = data.get("subscription", "")
     customer_id: str = data.get("customer", "")
@@ -560,13 +572,12 @@ async def _handle_checkout_completed(data: dict, db: DBSession) -> None:
 
     # Fetch the full subscription — convert to plain dict immediately to avoid StripeObject.get() issues
     import json as _json
+
     settings = get_settings()
     stripe.api_key = settings.stripe_secret_key
     stripe_sub_obj = stripe.Subscription.retrieve(stripe_sub_id)
     stripe_sub: dict = _json.loads(str(stripe_sub_obj))
 
-    items_data: list = stripe_sub.get("items", {}).get("data", [])
-    price_id: str = items_data[0]["price"]["id"] if items_data else ""
     plan = UserTier.PRO  # all paid plans map to PRO
 
     # Find user by stripe_customer_id
@@ -577,9 +588,7 @@ async def _handle_checkout_completed(data: dict, db: DBSession) -> None:
         return
 
     # Upsert subscription record
-    existing_result = await db.execute(
-        select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-    )
+    existing_result = await db.execute(select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id))
     sub = existing_result.scalar_one_or_none()
     if sub is None:
         sub = Subscription(
@@ -587,8 +596,8 @@ async def _handle_checkout_completed(data: dict, db: DBSession) -> None:
             stripe_subscription_id=stripe_sub_id,
             plan=plan,
             status=SubscriptionStatus.ACTIVE,
-            current_period_start=datetime.fromtimestamp(stripe_sub.get("current_period_start", 0), tz=timezone.utc),
-            current_period_end=datetime.fromtimestamp(stripe_sub.get("current_period_end", 0), tz=timezone.utc),
+            current_period_start=datetime.fromtimestamp(stripe_sub.get("current_period_start", 0), tz=UTC),
+            current_period_end=datetime.fromtimestamp(stripe_sub.get("current_period_end", 0), tz=UTC),
         )
     else:
         sub.status = SubscriptionStatus.ACTIVE
@@ -616,7 +625,7 @@ async def _handle_subscription_updated(data: dict, db: DBSession) -> None:
 
     period_end = data.get("current_period_end")
     if period_end:
-        sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
+        sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
 
     db.add(sub)
     await db.commit()
