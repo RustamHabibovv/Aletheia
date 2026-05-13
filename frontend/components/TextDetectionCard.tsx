@@ -1,11 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { AnalysisResult } from "@/lib/types";
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
   HelpCircleIcon,
   FileTextIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
 } from "lucide-react";
 
 const CLASSIFICATION_CONFIG: Record<
@@ -48,6 +51,7 @@ interface Props {
 }
 
 export default function TextDetectionCard({ result }: Props) {
+  const [collapsed, setCollapsed] = useState(true);
   const classification = result.classification ?? "mixed";
   const cfg = CLASSIFICATION_CONFIG[classification] ?? CLASSIFICATION_CONFIG["mixed"];
   const VerdictIcon = cfg.Icon;
@@ -56,6 +60,8 @@ export default function TextDetectionCard({ result }: Props) {
   const sentences = result.sentenceAnalysis ?? [];
   const explanation = result.explanation ?? "";
   const signals = result.details ?? [];
+  const hasDetails = scorePct != null || explanation || signals.length > 0 || sentences.length > 0;
+  const ChevronIcon = collapsed ? ChevronDownIcon : ChevronUpIcon;
 
   return (
     <div
@@ -68,15 +74,17 @@ export default function TextDetectionCard({ result }: Props) {
         fontSize: 13,
       }}
     >
-      {/* Header */}
+      {/* Header — always visible, click to expand/collapse */}
       <div
+        onClick={() => hasDetails && setCollapsed((c) => !c)}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 10,
           padding: "12px 14px",
-          borderBottom: "1px solid var(--border)",
           background: cfg.bg,
+          cursor: hasDetails ? "pointer" : "default",
+          userSelect: "none",
         }}
       >
         <VerdictIcon size={18} style={{ color: cfg.color, flexShrink: 0 }} />
@@ -97,9 +105,13 @@ export default function TextDetectionCard({ result }: Props) {
         {scorePct != null && (
           <AiScoreBadge value={scorePct} color={cfg.color} />
         )}
+        {hasDetails && (
+          <ChevronIcon size={16} style={{ color: "var(--text-secondary)", flexShrink: 0, marginLeft: 4 }} />
+        )}
       </div>
 
-      <div style={{ padding: "10px 14px 12px" }}>
+      {!collapsed && hasDetails && (
+      <div style={{ padding: "10px 14px 12px", borderTop: "1px solid var(--border)" }}>
         {/* AI Probability Bar */}
         {scorePct != null && <ProbabilityBar value={scorePct} />}
 
@@ -243,6 +255,7 @@ export default function TextDetectionCard({ result }: Props) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

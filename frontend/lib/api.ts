@@ -85,6 +85,20 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── User ─────────────────────────────────────────────────────────────
+
+export interface ApiUser {
+  id: string;
+  email: string;
+  name: string | null;
+  image: string | null;
+  tier: "FREE" | "PRO" | "ENTERPRISE";
+}
+
+export function getMe(): Promise<ApiUser> {
+  return apiFetch("/api/v1/users/me");
+}
+
 // ── Conversations ────────────────────────────────────────────────────
 
 export function getConversations(): Promise<ApiConversation[]> {
@@ -109,4 +123,77 @@ export function sendChat(conversationId: string, content: string, tool: string):
     method: "POST",
     body: JSON.stringify({ content, tool }),
   });
+}
+
+// ── Billing ───────────────────────────────────────────────────────────
+
+export function createCheckoutSession(
+  plan: "monthly" | "yearly",
+  planTier: "PRO" | "BUSINESS" = "PRO",
+): Promise<{ url: string }> {
+  return apiFetch("/api/v1/billing/checkout", {
+    method: "POST",
+    body: JSON.stringify({ plan, plan_tier: planTier }),
+  });
+}
+
+export interface ApiSubscription {
+  status: string;
+  plan: string;
+  plan_tier: "PRO" | "BUSINESS";
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  pending_plan_tier: "PRO" | "BUSINESS" | null;
+  pending_change_at: string | null;
+}
+
+export interface ApiChangePlanResponse {
+  status: "upgraded" | "scheduled" | "no_change";
+  current_plan_tier: "PRO" | "BUSINESS";
+  pending_plan_tier: "PRO" | "BUSINESS" | null;
+  pending_change_at: string | null;
+}
+
+export function changePlan(
+  planTier: "PRO" | "BUSINESS",
+  billing: "monthly" | "yearly",
+): Promise<ApiChangePlanResponse> {
+  return apiFetch("/api/v1/billing/change-plan", {
+    method: "POST",
+    body: JSON.stringify({ plan_tier: planTier, billing }),
+  });
+}
+
+export function getSubscription(): Promise<ApiSubscription | null> {
+  return apiFetch("/api/v1/billing/subscription");
+}
+
+export interface ApiCancelResponse {
+  cancel_at_period_end: boolean;
+  current_period_end: string | null;
+}
+
+export function cancelSubscription(): Promise<ApiCancelResponse> {
+  return apiFetch("/api/v1/billing/cancel", { method: "POST" });
+}
+
+export function createPortalSession(): Promise<{ url: string }> {
+  return apiFetch("/api/v1/billing/portal", { method: "POST" });
+}
+
+// Pulls the latest subscription state from Stripe and updates the user's
+// tier in the DB. Used as a fallback when the Stripe webhook listener
+// isn't running locally — call after returning from Checkout.
+export function syncSubscription(): Promise<{ synced: boolean; tier: string }> {
+  return apiFetch("/api/v1/billing/sync", { method: "POST" });
+}
+
+export interface ApiUsage {
+  used: number;
+  limit: number | null;
+  remaining: number | null;
+}
+
+export function getUsage(): Promise<ApiUsage> {
+  return apiFetch("/api/v1/billing/usage");
 }

@@ -54,3 +54,5 @@ out/
 # Misc
 *.log
 .ruff_cache/
+.claude/
+*.zip

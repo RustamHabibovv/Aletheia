@@ -54,7 +54,7 @@ async def get_conversation(
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
-        messages=[MessageResponse.model_validate(m) for m in messages],
+        messages=[_msg_to_response(m) for m in messages],
     )
 
 
@@ -107,6 +107,13 @@ async def list_messages(conversation_id: uuid.UUID, user: CurrentUser, session: 
 
 
 # ── helpers ────────────────────────────────────────────────────────
+
+
+def _msg_to_response(m: Message) -> MessageResponse:
+    r = MessageResponse.model_validate(m)
+    if m.metadata_ and isinstance(m.metadata_.get("analysis"), dict):
+        r.analysis = m.metadata_["analysis"]
+    return r
 
 
 async def _get_owned_conversation(conversation_id: uuid.UUID, user_id: uuid.UUID, session: DBSession) -> Conversation:
