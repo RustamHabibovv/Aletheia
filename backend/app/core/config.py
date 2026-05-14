@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_price_pro: str = ""
     stripe_price_enterprise: str = ""
+    stripe_price_pro_monthly: str = ""
+    stripe_price_pro_yearly: str = ""
+    stripe_price_business_monthly: str = ""
+    stripe_price_business_yearly: str = ""
+    stripe_success_url: str = "http://localhost:3000/"
+    stripe_cancel_url: str = "http://localhost:3000/"
 
     @property
     def database_url_sync(self) -> str:

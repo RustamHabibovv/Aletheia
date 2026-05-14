@@ -15,7 +15,7 @@ import {
 import { Message, ToolId, AnalysisResult, DetailItem, SourceItem } from "@/lib/types";
 import { TOOLS } from "@/lib/tools";
 import { Session } from "@/lib/sessions";
-import { getConversation, createConversation, sendChat, ApiMessage } from "@/lib/api";
+import { getConversation, createConversation, sendChat, ApiMessage, ApiUsage } from "@/lib/api";
 import AnalysisCard from "./AnalysisCard";
 import TextDetectionCard from "./TextDetectionCard";
 
@@ -121,9 +121,14 @@ interface Props {
   onToolChange: (tool: ToolId) => void;
   session: Session | null;
   onConversationCreated: (id: string, title: string) => void;
+  onFactCheckSent?: () => void;
+  usage?: ApiUsage | null;
+  userTier?: "FREE" | "PRO" | "ENTERPRISE";
+  tierLoaded?: boolean;
+  onUpgrade?: () => void;
 }
 
-export default function ChatInterface({ activeTool, onToolChange, session, onConversationCreated }: Props) {
+export default function ChatInterface({ activeTool, onToolChange, session, onConversationCreated, onFactCheckSent, usage, userTier = "FREE", tierLoaded = false, onUpgrade }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -134,6 +139,10 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tool = TOOLS.find((t) => t.id === activeTool)!;
+  const isFree = userTier === "FREE";
+  // Only enforce limit once we know the real tier — prevents the send button being
+  // briefly enabled before the API response arrives on users who hit their limit.
+  const limitReached = tierLoaded && isFree && usage != null && usage.remaining === 0;;
 
   // Reset when switching sessions or starting a new one
   useEffect(() => {
@@ -193,6 +202,7 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
       const assistantApiMsg = await sendChat(convId, content, activeTool);
       const assistantMsg = apiMessageToLocal(assistantApiMsg);
       setMessages((prev) => [...prev, assistantMsg]);
+      onFactCheckSent?.();
     } catch (err) {
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -205,12 +215,12 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }, [input, attachedFile, isLoading, conversationId, activeTool, onConversationCreated]);
+  }, [input, attachedFile, isLoading, conversationId, activeTool, onConversationCreated, onFactCheckSent]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (!limitReached) handleSend();
     }
   }
 
@@ -302,7 +312,14 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
         {isEmpty && <EmptyState tool={tool} onSuggest={(s) => setInput(s)} />}
 
         {messages.map((msg, i) => (
-          <MessageRow key={msg.id} message={msg} index={i} toolColor={tool.color} />
+          <MessageRow
+            key={msg.id}
+            message={msg}
+            index={i}
+            toolColor={tool.color}
+            isFree={isFree}
+            onUpgrade={onUpgrade}
+          />
         ))}
 
         {isLoading && <TypingIndicator toolColor={tool.color} />}
@@ -349,8 +366,8 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
             display: "flex",
             alignItems: "flex-end",
             gap: 8,
-            background: "var(--surface-2)",
-            border: "1px solid var(--border)",
+            background: limitReached ? "rgba(239,68,68,0.05)" : "var(--surface-2)",
+            border: `1px solid ${limitReached ? "rgba(239,68,68,0.35)" : "var(--border)"}`,
             borderRadius: 12,
             padding: "8px 8px 8px 14px",
           }}
@@ -360,8 +377,8 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={tool.placeholder}
-            disabled={isLoading}
+            placeholder={limitReached ? "Daily limit reached — upgrade to continue" : tool.placeholder}
+            disabled={isLoading || limitReached}
             rows={1}
             style={{
               flex: 1,
@@ -384,7 +401,7 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
           />
 
           <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-            {tool.acceptsFile && (
+            {!limitReached && tool.acceptsFile && (
               <>
                 <input
                   ref={fileInputRef}
@@ -402,34 +419,87 @@ export default function ChatInterface({ activeTool, onToolChange, session, onCon
                 </IconButton>
               </>
             )}
-            <IconButton
-              onClick={handleSend}
-              disabled={isLoading || (!input.trim() && !attachedFile)}
-              primary
-              title="Send"
-            >
-              <SendIcon size={16} />
-            </IconButton>
+            {limitReached ? (
+              <button
+                onClick={onUpgrade}
+                style={{
+                  padding: "0 14px",
+                  height: 36,
+                  borderRadius: 8,
+                  border: "none",
+                  cursor: "pointer",
+                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
+              >
+                Upgrade
+              </button>
+            ) : (
+              <IconButton
+                onClick={handleSend}
+                disabled={isLoading || (!input.trim() && !attachedFile)}
+                primary
+                title="Send"
+              >
+                <SendIcon size={16} />
+              </IconButton>
+            )}
           </div>
         </div>
 
         <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-secondary)", marginTop: 6 }}>
-          Press{" "}
-          <kbd style={{ padding: "1px 5px", background: "var(--surface-2)", borderRadius: 4, border: "1px solid var(--border)" }}>
-            Enter
-          </kbd>{" "}
-          to send ·{" "}
-          <kbd style={{ padding: "1px 5px", background: "var(--surface-2)", borderRadius: 4, border: "1px solid var(--border)" }}>
-            Shift+Enter
-          </kbd>{" "}
-          for new line
+          {limitReached ? (
+            <span style={{ color: "#ef4444" }}>
+              Daily limit of {usage?.limit} analyses reached ·{" "}
+              <span
+                onClick={onUpgrade}
+                style={{ textDecoration: "underline", cursor: "pointer" }}
+              >
+                Upgrade to Pro
+              </span>{" "}
+              for unlimited access
+            </span>
+          ) : (
+            <>
+              Press{" "}
+              <kbd style={{ padding: "1px 5px", background: "var(--surface-2)", borderRadius: 4, border: "1px solid var(--border)" }}>
+                Enter
+              </kbd>{" "}
+              to send ·{" "}
+              <kbd style={{ padding: "1px 5px", background: "var(--surface-2)", borderRadius: 4, border: "1px solid var(--border)" }}>
+                Shift+Enter
+              </kbd>{" "}
+              for new line
+              {isFree && usage != null && usage.limit != null && (
+                <span style={{ marginLeft: 10, color: usage.remaining != null && usage.remaining <= 2 ? "#f59e0b" : "var(--text-secondary)" }}>
+                  · {usage.remaining} / {usage.limit} remaining
+                </span>
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function MessageRow({ message, index, toolColor }: { message: Message; index: number; toolColor: string }) {
+function MessageRow({
+  message,
+  index,
+  toolColor,
+  isFree,
+  onUpgrade,
+}: {
+  message: Message;
+  index: number;
+  toolColor: string;
+  isFree?: boolean;
+  onUpgrade?: () => void;
+}) {
   const isUser = message.role === "user";
   return (
     <div
@@ -484,7 +554,7 @@ function MessageRow({ message, index, toolColor }: { message: Message; index: nu
         {message.analysis && (
           message.analysis.analysisType === "TEXT_DETECTION"
             ? <TextDetectionCard result={message.analysis} />
-            : <AnalysisCard result={message.analysis} />
+            : <AnalysisCard result={message.analysis} isFree={isFree} onUpgrade={onUpgrade} />
         )}
 
         <div
@@ -503,20 +573,82 @@ function MessageRow({ message, index, toolColor }: { message: Message; index: nu
 }
 
 function FormattedText({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+  const lines = text.split("\n");
   return (
-    <>
-      {parts.map((part, i) =>
-        part.startsWith("**") && part.endsWith("**") ? (
-          <strong key={i}>{part.slice(2, -2)}</strong>
-        ) : part.startsWith("*") && part.endsWith("*") ? (
-          <em key={i}>{part.slice(1, -1)}</em>
-        ) : (
-          <span key={i}>{part}</span>
-        )
-      )}
-    </>
+    <span style={{ display: "block" }}>
+      {lines.map((line, li) => {
+        // Blank line — paragraph gap
+        if (line === "") {
+          return <span key={li} style={{ display: "block", marginTop: 8 }} />;
+        }
+
+        // Horizontal rule
+        if (/^---+$/.test(line.trim())) {
+          return <hr key={li} style={{ border: "none", borderTop: "1px solid var(--border)", margin: "8px 0" }} />;
+        }
+
+        // Headings
+        const h3 = line.match(/^###\s+(.*)/);
+        const h2 = line.match(/^##\s+(.*)/);
+        const h1 = line.match(/^#\s+(.*)/);
+        if (h1) return <span key={li} style={{ display: "block", fontWeight: 800, fontSize: 15, marginTop: li > 0 ? 10 : 0, color: "var(--text-primary)" }}>{renderInline(h1[1])}</span>;
+        if (h2) return <span key={li} style={{ display: "block", fontWeight: 700, fontSize: 14, marginTop: li > 0 ? 8 : 0, color: "var(--text-primary)" }}>{renderInline(h2[1])}</span>;
+        if (h3) return <span key={li} style={{ display: "block", fontWeight: 600, fontSize: 13, marginTop: li > 0 ? 6 : 0, color: "var(--text-primary)", opacity: 0.9 }}>{renderInline(h3[1])}</span>;
+
+        // Numbered list
+        const numbered = line.match(/^(\d+)\.\s+(.*)/);
+        if (numbered) {
+          return (
+            <span key={li} style={{ display: "flex", gap: 6, marginTop: 3, paddingLeft: 4 }}>
+              <span style={{ opacity: 0.5, flexShrink: 0, minWidth: 16 }}>{numbered[1]}.</span>
+              <span>{renderInline(numbered[2])}</span>
+            </span>
+          );
+        }
+
+        // Bullet list
+        const bullet = line.match(/^[-*]\s+(.*)/);
+        if (bullet) {
+          return (
+            <span key={li} style={{ display: "flex", gap: 6, marginTop: 3, paddingLeft: 4 }}>
+              <span style={{ opacity: 0.5, flexShrink: 0 }}>•</span>
+              <span>{renderInline(bullet[1])}</span>
+            </span>
+          );
+        }
+
+        // Plain paragraph line
+        return (
+          <span key={li} style={{ display: "block", marginTop: li > 0 && lines[li - 1] !== "" ? 2 : 0 }}>
+            {renderInline(line)}
+          </span>
+        );
+      })}
+    </span>
   );
+}
+
+function renderInline(text: string): React.ReactNode[] {
+  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  const parts = text.split(pattern);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    }
+    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      return (
+        <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+          style={{ color: "var(--accent, #6366f1)", textDecoration: "underline" }}>
+          {linkMatch[1]}
+        </a>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
 }
 
 function TypingIndicator({ toolColor }: { toolColor: string }) {

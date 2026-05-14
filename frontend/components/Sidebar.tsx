@@ -1,17 +1,25 @@
 "use client";
 
-import { ShieldAlertIcon, PlusIcon, LogOutIcon } from "lucide-react";
+import { ShieldAlertIcon, PlusIcon, LogOutIcon, ZapIcon } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { Session, groupSessionsByDate } from "@/lib/sessions";
+import { ApiUsage } from "@/lib/api";
 
 interface SidebarProps {
   sessions: Session[];
   activeSessionId: string | null;
   onSelectSession: (session: Session) => void;
   onNewSession: () => void;
+  onUpgrade?: () => void;
+  usage?: ApiUsage | null;
+  displayPlan?: "FREE" | "PRO" | "BUSINESS";
 }
 
-export default function Sidebar({ sessions, activeSessionId, onSelectSession, onNewSession }: SidebarProps) {
+export default function Sidebar({ sessions, activeSessionId, onSelectSession, onNewSession, onUpgrade, usage, displayPlan = "FREE" }: SidebarProps) {
+  const isPaid = displayPlan !== "FREE";
+  const isBusiness = displayPlan === "BUSINESS";
+  const planAccent = isBusiness ? "#0ea5e9" : "#6366f1";
+  const planLabel = isBusiness ? "Business plan · Unlimited" : "Pro plan · Unlimited";
   const groups = groupSessionsByDate(sessions);
 
   return (
@@ -126,6 +134,93 @@ export default function Sidebar({ sessions, activeSessionId, onSelectSession, on
           </div>
         ))}
       </nav>
+
+      {/* Daily usage bar — only shown for free users */}
+      {!isPaid && usage && usage.limit !== null && (
+        <div style={{ padding: "8px 14px 4px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>
+            <span>Analyses today</span>
+            <span style={{ fontWeight: 600, color: usage.remaining === 0 ? "#ef4444" : "var(--text-secondary)" }}>
+              {usage.used} / {usage.limit}
+            </span>
+          </div>
+          <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+            <div style={{
+              height: "100%",
+              width: `${Math.min(100, (usage.used / usage.limit) * 100)}%`,
+              borderRadius: 2,
+              background: usage.remaining === 0 ? "#ef4444" : usage.used / usage.limit > 0.7 ? "#f59e0b" : "#6366f1",
+              transition: "width 0.4s ease",
+            }} />
+          </div>
+          {usage.remaining === 0 && (
+            <div style={{ fontSize: 11, color: "#ef4444", marginTop: 4 }}>
+              Limit reached · Upgrade to continue
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Upgrade button — hidden for paid users */}
+      {!isPaid && onUpgrade && (
+        <div style={{ padding: "8px 10px 4px" }}>
+          <button
+            onClick={onUpgrade}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              transition: "opacity 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+          >
+            <ZapIcon size={14} />
+            Upgrade to Pro
+          </button>
+        </div>
+      )}
+
+      {/* Paid badge — shown for Pro / Business users */}
+      {isPaid && onUpgrade && (
+        <div style={{ padding: "8px 10px 4px" }}>
+          <button
+            onClick={onUpgrade}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: `1px solid ${planAccent}4d`,
+              cursor: "pointer",
+              background: `${planAccent}1a`,
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = `${planAccent}33`;
+              e.currentTarget.style.borderColor = `${planAccent}99`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = `${planAccent}1a`;
+              e.currentTarget.style.borderColor = `${planAccent}4d`;
+            }}
+          >
+            <ZapIcon size={14} style={{ color: planAccent }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: planAccent }}>{planLabel}</span>
+          </button>
+        </div>
+      )}
 
       {/* Logout */}
       <div style={{ padding: "8px 10px", borderTop: "1px solid var(--border)" }}>

@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
@@ -10,11 +11,13 @@ from app.agents.fact_checker import FactChecker
 from app.agents.text_detector import TextDetector
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import get_settings
-from app.models import Conversation, Message, MessageRole
+from app.models import Conversation, Message, MessageRole, UsageRecord, UserTier
 from app.schemas.conversation import ChatRequest, MessageResponse
 from app.services.openai_service import generate_reply
 from app.services.url_extractor import extract_url_content
 from app.utils.url_detect import extract_urls
+
+FREE_DAILY_FACTCHECK_LIMIT = 5
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +59,26 @@ async def chat(
     settings = get_settings()
     analysis_result = None
     source_url: str | None = None
+
+    # Enforce daily limit for all tools on free tier
+    if user.tier == UserTier.FREE:
+        usage = await _get_or_create_usage(user.id, session)
+        if usage.request_count >= FREE_DAILY_FACTCHECK_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Daily limit of {FREE_DAILY_FACTCHECK_LIMIT} analyses reached. "
+                    "Upgrade to Pro for unlimited access."
+                ),
+            )
+
     if body.tool == "fact-check":
-        # If the user pasted a URL, fetch its content and analyse that instead
         urls = extract_urls(body.content)
         fact_check_text = body.content
         if urls:
-            source_url = urls[0]  # analyse the first URL
+            source_url = urls[0]
             extracted = await extract_url_content(source_url, tavily_api_key=settings.tavily_api_key)
             if extracted.error is None and extracted.text:
-                # Prepend URL context so the LLM/pipeline knows the source
                 fact_check_text = (
                     f"[Source: {extracted.source_domain} — {extracted.url}]\n"
                     f"Title: {extracted.title}\n\n"
@@ -72,7 +86,7 @@ async def chat(
                 )
             else:
                 logger.warning("URL extraction failed for %s: %s", source_url, extracted.error)
-                source_url = None  # treat as plain-text input
+                source_url = None
 
         try:
             analysis_result = await FactChecker(settings).check(fact_check_text)
@@ -85,8 +99,8 @@ async def chat(
         if source_url:
             analysis_result["source_url"] = source_url
         reply_text = _format_fact_check(analysis_result)
+
     elif body.tool == "text-detection":
-        # If the user pasted a URL, fetch its content for AI text detection
         urls = extract_urls(body.content)
         detect_text = body.content
         if urls:
@@ -98,22 +112,32 @@ async def chat(
 
         analysis_result = await TextDetector(settings).detect(detect_text)
         reply_text = _format_text_detection(analysis_result)
+
     else:
         reply_text = await generate_reply(body.tool, history, body.content, settings)
 
-    # Persist assistant message
+    # Increment shared daily counter after successful analysis (all tools, free tier only)
+    if user.tier == UserTier.FREE:
+        usage = await _get_or_create_usage(user.id, session)
+        usage.request_count += 1
+        session.add(usage)
+        await session.commit()
+
+    # Persist assistant message — store serialised analysis in metadata so it survives page reload
+    serialized_analysis = _serialize_analysis(analysis_result) if analysis_result is not None else None
     assistant_msg = Message(
         conversation_id=conversation_id,
         role=MessageRole.ASSISTANT,
         content=reply_text,
+        metadata_={"analysis": serialized_analysis} if serialized_analysis is not None else None,
     )
     session.add(assistant_msg)
     await session.commit()
     await session.refresh(assistant_msg)
 
     response = MessageResponse.model_validate(assistant_msg)
-    if analysis_result is not None:
-        response.analysis = _serialize_analysis(analysis_result)
+    if serialized_analysis is not None:
+        response.analysis = serialized_analysis
     return response
 
 
@@ -214,6 +238,24 @@ def _format_text_detection(result: dict) -> str:
             lines.append(f'- "{s.get("sentence", "")[:120]}" — {prob:.0%} AI probability')
 
     return "\n".join(lines)
+
+
+async def _get_or_create_usage(user_id: uuid.UUID, session: DBSession) -> UsageRecord:
+    today = datetime.now(tz=UTC).date()
+    today_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
+    result = await session.execute(
+        select(UsageRecord).where(
+            UsageRecord.user_id == user_id,
+            UsageRecord.date == today_start,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        record = UsageRecord(user_id=user_id, date=today_start, request_count=0)
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+    return record
 
 
 async def _get_owned_conversation(conversation_id: uuid.UUID, user_id: uuid.UUID, session: DBSession) -> Conversation:

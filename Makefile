@@ -11,6 +11,13 @@ help: ## Show this help
 dev: ## Run FastAPI dev server with hot reload
 	cd backend && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
+dev-all: ## Start backend, frontend, and Stripe webhook listener (Ctrl+C stops all)
+	@bash -c 'trap "kill 0" SIGINT; \
+	(cd backend && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000) & \
+	(cd frontend && npm run dev) & \
+	stripe listen --forward-to localhost:8000/api/v1/billing/webhook & \
+	wait'
+
 # --- Database Migrations ---
 migrate: ## Run all pending Alembic migrations
 	cd backend && uv run alembic upgrade head
