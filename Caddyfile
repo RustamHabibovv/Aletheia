@@ -1,0 +1,19 @@
+aletheiai.ai, www.aletheiai.ai {
+	encode zstd gzip
+
+	# Route FastAPI's /api/v1/* to the backend container.
+	# NextAuth's /api/auth/* falls through to the frontend.
+	handle /api/v1/* {
+		reverse_proxy backend:8000
+	}
+
+	# Health check passthrough (handy for uptime monitors).
+	handle /health {
+		reverse_proxy backend:8000
+	}
+
+	# Everything else -> Next.js
+	handle {
+		reverse_proxy frontend:3000
+	}
+}
