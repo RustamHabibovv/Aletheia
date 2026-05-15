@@ -1,7 +1,14 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: aletheia
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -18,6 +25,7 @@ services:
     build:
       context: ./backend
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -34,6 +42,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: https://aletheiai.ai
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - frontend/.env.local
     depends_on:
@@ -44,6 +53,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "80:80"
       - "443:443"
