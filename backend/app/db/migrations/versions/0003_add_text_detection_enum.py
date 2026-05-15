@@ -1,7 +1,7 @@
 """add TEXT_DETECTION to analysistype enum
 
-Revision ID: 0002_add_text_detection
-Revises: 0001_initial
+Revision ID: 0003_add_text_detection
+Revises: 0002_add_hashed_password
 Create Date: 2026-04-16
 
 """
@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0002_add_text_detection"
-down_revision: str = "0001_initial"
+revision: str = "0003_add_text_detection"
+down_revision: str = "0002_add_hashed_password"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
